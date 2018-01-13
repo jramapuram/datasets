@@ -35,7 +35,7 @@ def load_cluttered_mnist(path):
             torch.cat(test_labels).type(torch.LongTensor)]
 
 class ClutteredMNISTLoader(object):
-    def __init__(self, path, batch_size, use_cuda=1):
+    def __init__(self, path, batch_size, sampler=None, use_cuda=1):
         # load the tensor dataset from it's t7 binaries
         imgs_train, imgs_val, imgs_test, \
             labels_train, labels_val, labels_test = load_cluttered_mnist(path=path)
@@ -44,27 +44,36 @@ class ClutteredMNISTLoader(object):
         print("test = ", imgs_test.size(), " | lbl = ", labels_test.size())
         train_dataset = torch.utils.data.TensorDataset(imgs_train,
                                                        labels_train)
-        val_dataset = torch.utils.data.TensorDataset(imgs_val,
-                                                     labels_val)
+        # val_dataset = torch.utils.data.TensorDataset(imgs_val,
+        #                                              labels_val)
         test_dataset = torch.utils.data.TensorDataset(imgs_test,
                                                       labels_test)
 
         kwargs = {'num_workers': 1, 'pin_memory': True} if use_cuda else {}
+
+        train_sampler = sampler(train_dataset) if sampler else None
         self.train_loader = torch.utils.data.DataLoader(
             train_dataset,
             batch_size=batch_size,
             drop_last=True,
-            shuffle=True, **kwargs)
-        self.val_loader = torch.utils.data.DataLoader(
-            val_dataset,
-            batch_size=batch_size,
-            drop_last=True,
-            shuffle=False, **kwargs)
+            shuffle=not sampler,
+            sampler=train_sampler,
+            **kwargs)
+
+        # self.val_loader = torch.utils.data.DataLoader(
+        #     val_dataset,
+        #     batch_size=batch_size,
+        #     drop_last=True,
+        #     shuffle=False, **kwargs)
+
+        test_sampler = sampler(test_dataset) if sampler else None
         self.test_loader = torch.utils.data.DataLoader(
             test_dataset,
             batch_size=batch_size,
             drop_last=True,
-            shuffle=False, **kwargs)
+            shuffle=False,
+            sampler=test_sampler,
+            **kwargs)
 
         self.output_size = 10
         self.batch_size = batch_size

@@ -17,37 +17,45 @@ class SVHNFullLoader(object):
         The classes here are BCE classes where each bit
         signifies the presence of the digit in the img'''
 
-    def __init__(self, path, batch_size, use_cuda=1):
+    def __init__(self, path, batch_size, sampler=None, use_cuda=1):
         kwargs = {'num_workers': 2, 'pin_memory': True} if use_cuda else {}
         # normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406],
         #                                  std=[0.229, 0.224, 0.225])
         normalize = transforms.Normalize(mean=(0.5, 0.5, 0.5),
                                          std=(0.5, 0.5, 0.5))
+        train_dataset = SVHNFull(path, split='train', download=True,
+                                 transform=transforms.Compose([
+                                     transforms.ToTensor(),
+                                     normalize
+                                     #transforms.Normalize((0.45142,), (0.039718,))
+                                 ]),
+                                 target_transform=transforms.Lambda(SubtractOneLambda()))
+        train_sampler = sampler(train_dataset)
 
         self.train_loader = torch.utils.data.DataLoader(
-            SVHNFull(path, split='train', download=True,
-                     transform=transforms.Compose([
-                         transforms.ToTensor(),
-                         normalize
-                         #transforms.Normalize((0.45142,), (0.039718,))
-                     ]),
-                     target_transform=transforms.Lambda(SubtractOneLambda())),
+            train_dataset,
             batch_size=batch_size,
             drop_last=True,
-            shuffle=True, **kwargs)
+            shuffle=not sampler,
+            sampler=train_sampler
+            **kwargs)
         print("successfully loaded SVHN training data...")
 
+        test_dataset = SVHNFull(path, split='test', download=True,
+                                transform=transforms.Compose([
+                                    transforms.ToTensor(),
+                                    normalize
+                                    #transforms.Normalize((0.45142,), (0.039718,))
+                                ]),
+                                target_transform=transforms.Lambda(SubtractOneLambda()))
+        test_sampler = sampler(test_dataset)
         self.test_loader = torch.utils.data.DataLoader(
-            SVHNFull(path, split='test', download=True,
-                     transform=transforms.Compose([
-                         transforms.ToTensor(),
-                         normalize
-                         #transforms.Normalize((0.45142,), (0.039718,))
-                     ]),
-                     target_transform=transforms.Lambda(SubtractOneLambda())),
+            test_dataset,
             batch_size=batch_size,
             drop_last=True,
-            shuffle=True, **kwargs)
+            shuffle=False,
+            sampler=test_sampler,
+            **kwargs)
         print("successfully loaded SVHN test data...")
 
         self.output_size = 10
@@ -56,34 +64,42 @@ class SVHNFullLoader(object):
 
 
 class SVHNCenteredLoader(object):
-    def __init__(self, path, batch_size, use_cuda=1):
+    def __init__(self, path, batch_size, sampler=None, use_cuda=1):
         kwargs = {'num_workers': 2, 'pin_memory': True} if use_cuda else {}
         # normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406],
         #                                  std=[0.229, 0.224, 0.225])
         normalize = transforms.Normalize(mean=(0.5, 0.5, 0.5),
                                          std=(0.5, 0.5, 0.5))
 
+        train_dataset = datasets.SVHN(path, split='train', download=True,
+                                      transform=transforms.Compose([
+                                          transforms.ToTensor(),
+                                          normalize
+                                          #transforms.Normalize((0.45142,), (0.039718,))
+                                      ]))
+        train_sampler = sampler(train_dataset) if sampler else None
         self.train_loader = torch.utils.data.DataLoader(
-            datasets.SVHN(path, split='train', download=True,
-                          transform=transforms.Compose([
-                              transforms.ToTensor(),
-                              normalize
-                              #transforms.Normalize((0.45142,), (0.039718,))
-                          ])),
+            train_dataset,
             batch_size=batch_size,
             drop_last=True,
-            shuffle=True, **kwargs)
+            shuffle=not sampler,
+            sampler=train_sampler
+            **kwargs)
 
+        test_dataset = datasets.SVHN(path, split='test', download=True,
+                                     transform=transforms.Compose([
+                                         transforms.ToTensor(),
+                                         normalize
+                                         #transforms.Normalize((0.45142,), (0.039718,))
+                                     ]))
+        test_sampler = sampler(test_dataset) if sampler else None
         self.test_loader = torch.utils.data.DataLoader(
-            datasets.SVHN(path, split='test', download=True,
-                          transform=transforms.Compose([
-                              transforms.ToTensor(),
-                              normalize
-                              #transforms.Normalize((0.45142,), (0.039718,))
-                          ])),
+            test_dataset,
             batch_size=batch_size,
             drop_last=True,
-            shuffle=True, **kwargs)
+            shuffle=False,
+            sampler=test_sampler,
+            **kwargs)
 
         self.output_size = 10
         self.batch_size = batch_size

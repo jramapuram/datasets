@@ -11,29 +11,39 @@ def bw_2_rgb_lambda(img):
     return  np.concatenate([expanded, expanded, expanded], axis=-1)
 
 class CIFAR10Loader(object):
-    def __init__(self, path, batch_size, use_cuda=1):
+    def __init__(self, path, batch_size, sampler=None, use_cuda=1):
         kwargs = {'num_workers': 1, 'pin_memory': True} if use_cuda else {}
+        train_dataset = datasets.CIFAR10(path, train=True, download=True,
+                                         transform=transforms.Compose([
+                                             #transforms.Lambda(resize_lambda),
+                                             #transforms.Lambda(bw_2_rgb_lambda),
+                                             transforms.ToTensor(),
+                                             # transforms.Normalize((0.1307,), (0.3081,))
+                                         ]))
+        train_sampler = sampler(train_dataset) if sampler else None
         self.train_loader = torch.utils.data.DataLoader(
-            datasets.CIFAR10(path, train=True, download=True,
-                           transform=transforms.Compose([
-                               #transforms.Lambda(resize_lambda),
-                               #transforms.Lambda(bw_2_rgb_lambda),
-                               transforms.ToTensor(),
-                               # transforms.Normalize((0.1307,), (0.3081,))
-                           ])),
+            train_dataset,
             batch_size=batch_size,
             drop_last=True,
-            shuffle=True, **kwargs)
+            shuffle=not sampler,
+            sampler=train_sampler
+            **kwargs)
+
+        test_dataset = datasets.CIFAR10(path, train=False,
+                                        transform=transforms.Compose([
+                                            #transforms.Lambda(resize_lambda),
+                                            #transforms.Lambda(bw_2_rgb_lambda),
+                                            transforms.ToTensor(),
+                                            #transforms.Normalize((0.1307,), (0.3081,))
+                                        ]))
+        test_sampler = sampler(test_dataset) if sampler else None
         self.test_loader = torch.utils.data.DataLoader(
-            datasets.CIFAR10(path, train=False, transform=transforms.Compose([
-                #transforms.Lambda(resize_lambda),
-                #transforms.Lambda(bw_2_rgb_lambda),
-                transforms.ToTensor(),
-                #transforms.Normalize((0.1307,), (0.3081,))
-            ])),
+            test_dataset,
             batch_size=batch_size,
             drop_last=True,
-            shuffle=True, **kwargs)
+            shuffle=not sampler,
+            sampler=test_sampler,
+            **kwargs)
 
         self.output_size = 10
         self.batch_size = batch_size

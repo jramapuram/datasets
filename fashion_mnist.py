@@ -64,23 +64,33 @@ def read_image_file(path):
 
 
 class FashionMNISTLoader(object):
-    def __init__(self, path, batch_size, use_cuda=1):
+    def __init__(self, path, batch_size, sampler=None, use_cuda=1):
         kwargs = {'num_workers': 1, 'pin_memory': True} if use_cuda else {}
+        train_dataset = FashionMNIST(path, train=True, download=True,
+                                     transform=transforms.Compose([
+                                         transforms.ToTensor(),
+                                     ]))
+        train_sampler = sampler(train_dataset) if sampler else None
         self.train_loader = torch.utils.data.DataLoader(
-            FashionMNIST(path, train=True, download=True,
-                           transform=transforms.Compose([
-                               transforms.ToTensor(),
-                           ])),
+            train_dataset,
             batch_size=batch_size,
             drop_last=True,
-            shuffle=True, **kwargs)
+            shuffle=not sampler,
+            sampler=train_sampler,
+            **kwargs)
+
+        test_dataset = FashionMNIST(path, train=False,
+                                    transform=transforms.Compose([
+                                        transforms.ToTensor(),
+                                    ]))
+        test_sampler = sampler(test_dataset) if sampler else None
         self.test_loader = torch.utils.data.DataLoader(
-            FashionMNIST(path, train=False, transform=transforms.Compose([
-                transforms.ToTensor(),
-            ])),
+            test_dataset,
             batch_size=batch_size,
             drop_last=True,
-            shuffle=True, **kwargs)
+            shuffle=False,
+            sampler=test_sampler,
+            **kwargs)
 
         self.output_size = 10
         self.batch_size = batch_size
