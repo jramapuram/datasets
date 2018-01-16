@@ -26,7 +26,7 @@ class CIFAR10Loader(object):
             batch_size=batch_size,
             drop_last=True,
             shuffle=not sampler,
-            sampler=train_sampler
+            sampler=train_sampler,
             **kwargs)
 
         test_dataset = datasets.CIFAR10(path, train=False,
