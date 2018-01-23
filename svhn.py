@@ -17,7 +17,7 @@ class SVHNFullLoader(object):
         The classes here are BCE classes where each bit
         signifies the presence of the digit in the img'''
 
-    def __init__(self, path, batch_size, sampler=None, use_cuda=1):
+    def __init__(self, path, batch_size, train_sampler=None, test_sampler=None, use_cuda=1):
         kwargs = {'num_workers': 2, 'pin_memory': True} if use_cuda else {}
         # normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406],
         #                                  std=[0.229, 0.224, 0.225])
@@ -30,13 +30,13 @@ class SVHNFullLoader(object):
                                      #transforms.Normalize((0.45142,), (0.039718,))
                                  ]),
                                  target_transform=transforms.Lambda(SubtractOneLambda()))
-        train_sampler = sampler(train_dataset)
+        train_sampler = train_sampler(train_dataset) if train_sampler else None
 
         self.train_loader = torch.utils.data.DataLoader(
             train_dataset,
             batch_size=batch_size,
             drop_last=True,
-            shuffle=not sampler,
+            shuffle=not train_sampler,
             sampler=train_sampler
             **kwargs)
         print("successfully loaded SVHN training data...")
@@ -48,7 +48,7 @@ class SVHNFullLoader(object):
                                     #transforms.Normalize((0.45142,), (0.039718,))
                                 ]),
                                 target_transform=transforms.Lambda(SubtractOneLambda()))
-        test_sampler = sampler(test_dataset)
+        test_sampler = test_sampler(test_dataset) if test_sampler else None
         self.test_loader = torch.utils.data.DataLoader(
             test_dataset,
             batch_size=batch_size,
@@ -64,7 +64,7 @@ class SVHNFullLoader(object):
 
 
 class SVHNCenteredLoader(object):
-    def __init__(self, path, batch_size, sampler=None, use_cuda=1):
+    def __init__(self, path, batch_size, train_sampler=None, test_sampler=None, use_cuda=1):
         kwargs = {'num_workers': 2, 'pin_memory': True} if use_cuda else {}
         # normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406],
         #                                  std=[0.229, 0.224, 0.225])
@@ -77,12 +77,12 @@ class SVHNCenteredLoader(object):
                                           normalize
                                           #transforms.Normalize((0.45142,), (0.039718,))
                                       ]))
-        train_sampler = sampler(train_dataset) if sampler else None
+        train_sampler = train_sampler(train_dataset) if train_sampler else None
         self.train_loader = torch.utils.data.DataLoader(
             train_dataset,
             batch_size=batch_size,
             drop_last=True,
-            shuffle=not sampler,
+            shuffle=not train_sampler,
             sampler=train_sampler
             **kwargs)
 
@@ -92,7 +92,7 @@ class SVHNCenteredLoader(object):
                                          normalize
                                          #transforms.Normalize((0.45142,), (0.039718,))
                                      ]))
-        test_sampler = sampler(test_dataset) if sampler else None
+        test_sampler = test_sampler(test_dataset) if test_sampler else None
         self.test_loader = torch.utils.data.DataLoader(
             test_dataset,
             batch_size=batch_size,

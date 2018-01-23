@@ -12,14 +12,26 @@ class ClassSampler(Sampler):
 
     Arguments:
         dataset: Dataset used for sampling.
-        class_number: The class index to filter out
+        class_number: The class index to filter out.
+                      This can be a list as well to handle
+                      multiple classes.
     """
 
     def __init__(self, dataset, class_number):
         assert class_number is not None
         self.dataset = dataset
         self.class_number = class_number
-        self.indices, self.num_samples = self._calc_indices(dataset, class_number)
+
+        # if we receive a list, then iterate over this sequentially
+        if isinstance(class_number, list):
+            self.indices = []
+            self.num_samples = 0
+            for cn in class_number:
+                indices, num_samples = self._calc_indices(dataset, cn)
+                self.indices += indices
+                self.num_samples += num_samples
+        else:
+            self.indices, self.num_samples = self._calc_indices(dataset, class_number)
 
     @staticmethod
     def _calc_indices(dataset, class_number):
