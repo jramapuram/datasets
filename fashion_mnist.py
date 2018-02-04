@@ -65,24 +65,20 @@ def read_image_file(path):
 
 class FashionMNISTLoader(object):
     def __init__(self, path, batch_size, train_sampler=None, test_sampler=None, use_cuda=1):
+        # first get the datasets
+        train_dataset, test_dataset = self.get_datasets(path)
+
         kwargs = {'num_workers': 1, 'pin_memory': True} if use_cuda else {}
-        train_dataset = FashionMNIST(path, train=True, download=True,
-                                     transform=transforms.Compose([
-                                         transforms.ToTensor(),
-                                     ]))
         train_sampler = train_sampler(train_dataset) if train_sampler else None
         self.train_loader = torch.utils.data.DataLoader(
             train_dataset,
             batch_size=batch_size,
             drop_last=True,
-            shuffle=not train_sampler,
+            shuffle=True if train_sampler is None else False,
             sampler=train_sampler,
             **kwargs)
 
-        test_dataset = FashionMNIST(path, train=False,
-                                    transform=transforms.Compose([
-                                        transforms.ToTensor(),
-                                    ]))
+
         test_sampler = test_sampler(test_dataset) if test_sampler else None
         self.test_loader = torch.utils.data.DataLoader(
             test_dataset,
@@ -98,3 +94,21 @@ class FashionMNISTLoader(object):
         # grab a test sample to get the size
         test_img, _ = self.train_loader.__iter__().__next__()
         self.img_shp = list(test_img.size()[1:])
+
+    @staticmethod
+    def get_datasets(path, transform=None, target_transform=None):
+        if transform:
+            assert isinstance(transform, list)
+
+        transform_list = []
+        if transform:
+            transform_list.extend(transform)
+
+        transform_list.append(transforms.ToTensor())
+        train_dataset = FashionMNIST(path, train=True, download=True,
+                                     transform=transforms.Compose(transform_list),
+                                     target_transform=target_transform)
+        test_dataset = FashionMNIST(path, train=False,
+                                    transform=transforms.Compose(transform_list),
+                                    target_transform=target_transform)
+        return train_dataset, test_dataset

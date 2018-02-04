@@ -1,53 +1,57 @@
 import os
+import cv2
 import torch
 from torchvision import datasets, transforms
 from torch.utils.serialization import load_lua
 
 
-def load_cluttered_mnist(path):
-    train = load_lua(os.path.join(path, 'train.t7'))
-    val = load_lua(os.path.join(path, 'valid.t7'))
-    test = load_lua(os.path.join(path, 'test.t7'))
-
-    train_data = [t[0].unsqueeze(1) for t in train]
-    train_labels = []
-    for t in train:
+def load_cluttered_mnist(path, segment='train'):
+    full = load_lua(os.path.join(path, '%s.t7'%segment))
+    data = [t[0].unsqueeze(1) for t in full]
+    labels = []
+    for t in full:
         _, index = torch.max(t[1], 0)
-        train_labels.append(index)
+        labels.append(index)
 
-    valid_data = [v[0].unsqueeze(1) for v in val]
-    valid_labels = []
-    for t in val:
-        _, index = torch.max(t[1], 0)
-        valid_labels.append(index)
+    return [torch.cat(data).type(torch.FloatTensor).numpy(),
+            torch.cat(labels).type(torch.LongTensor).numpy()]
 
-    test_data = [t[0].unsqueeze(1) for t in test]
-    test_labels = []
-    for t in test:
-        _, index = torch.max(t[1], 0)
-        test_labels.append(index)
 
-    return [torch.cat(train_data).type(torch.FloatTensor),
-            torch.cat(valid_data).type(torch.FloatTensor),
-            torch.cat(test_data).type(torch.FloatTensor),
-            torch.cat(train_labels).type(torch.LongTensor),
-            torch.cat(valid_labels).type(torch.LongTensor),
-            torch.cat(test_labels).type(torch.LongTensor)]
+class ClutteredMNISTDataset(torch.utils.data.Dataset):
+    def __init__(self, path, segment='train', transform=None, target_transform=None):
+        self.path = os.path.expanduser(path)
+        self.transform = transform
+        self.target_transform = target_transform
+        self.segment = segment.lower().strip()  # train or test or val
+
+        # load the images and labels
+        self.imgs, self.labels = self._load_from_path()
+
+    def _load_from_path(self):
+        # load the tensor dataset from it's t7 binaries
+        imgs, labels =  load_cluttered_mnist(self.path, segment=self.segment)
+        print("imgs_%s = "%self.segment, imgs.size(),
+              " | lbl_%s = "%self.segment, labels.size())
+        return imgs, labels
+
+    def __getitem__(self, index):
+        img, target = self.imgs[index], self.labels[index]
+        if self.transform is not None:
+            img = self.transform(img)
+
+        if self.target_transform is not None:
+            target = self.target_transform(target)
+
+        return img, target
+
+    def __len__(self):
+        return len(self.imgs)
+
 
 class ClutteredMNISTLoader(object):
     def __init__(self, path, batch_size, train_sampler=None, test_sampler=None, use_cuda=1):
-        # load the tensor dataset from it's t7 binaries
-        imgs_train, imgs_val, imgs_test, \
-            labels_train, labels_val, labels_test = load_cluttered_mnist(path=path)
-        print("train = ", imgs_train.size(), " | lbl = ", labels_train.size())
-        print("val = ", imgs_val.size(), " | lbl = ", labels_val.size())
-        print("test = ", imgs_test.size(), " | lbl = ", labels_test.size())
-        train_dataset = torch.utils.data.TensorDataset(imgs_train,
-                                                       labels_train)
-        # val_dataset = torch.utils.data.TensorDataset(imgs_val,
-        #                                              labels_val)
-        test_dataset = torch.utils.data.TensorDataset(imgs_test,
-                                                      labels_test)
+        # first get the datasets
+        train_dataset, test_dataset = self.get_datasets(path)
 
         kwargs = {'num_workers': 1, 'pin_memory': True} if use_cuda else {}
 
@@ -56,7 +60,7 @@ class ClutteredMNISTLoader(object):
             train_dataset,
             batch_size=batch_size,
             drop_last=True,
-            shuffle=not train_sampler,
+            shuffle=True if train_sampler is None else False,
             sampler=train_sampler,
             **kwargs)
 
@@ -79,3 +83,21 @@ class ClutteredMNISTLoader(object):
         self.batch_size = batch_size
         #self.img_shp = [28, 28]
         self.img_shp = [100, 100]
+
+    @staticmethod
+    def get_datasets(path, transform=None, target_transform=None):
+        if transform:
+            assert isinstance(transform, list)
+
+        transform_list = []
+        if transform:
+            transform_list.extend(transform)
+
+        transform_list.append(transforms.ToTensor())
+        train_dataset = ClutteredMNISTDataset(path, segment='train',
+                                              transform=transforms.Compose(transform_list),
+                                              target_transform=target_transform)
+        test_dataset = ClutteredMNISTDataset(path, segment='test',
+                                             transform=transforms.Compose(transform_list),
+                                             target_transform=target_transform)
+        return train_dataset, test_dataset
