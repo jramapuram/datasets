@@ -4,9 +4,10 @@ from torchvision import datasets, transforms
 
 
 class MNISTLoader(object):
-    def __init__(self, path, batch_size, train_sampler=None, test_sampler=None, use_cuda=1):
+    def __init__(self, path, batch_size, train_sampler=None, test_sampler=None,
+                 transform=None, target_transform=None, use_cuda=1):
         # first get the datasets
-        train_dataset, test_dataset = self.get_datasets(path)
+        train_dataset, test_dataset = self.get_datasets(path, transform, target_transform)
 
         kwargs = {'num_workers': 1, 'pin_memory': True} if use_cuda else {}
         train_sampler = train_sampler(train_dataset) if train_sampler else None

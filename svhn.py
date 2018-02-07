@@ -11,9 +11,11 @@ class SVHNFullLoader(object):
         The classes here are BCE classes where each bit
         signifies the presence of the digit in the img'''
 
-    def __init__(self, path, batch_size, train_sampler=None, test_sampler=None, use_cuda=1):
+    def __init__(self, path, batch_size, train_sampler=None, test_sampler=None,
+                 transform=None, target_transform=None, use_cuda=1):
         # first grab the datasets
-        train_dataset, test_dataset = self.get_datasets(path)
+        train_dataset, test_dataset = self.get_datasets(path, transform,
+                                                        target_transform)
 
         kwargs = {'num_workers': 2, 'pin_memory': True} if use_cuda else {}
 
@@ -66,10 +68,12 @@ class SVHNFullLoader(object):
 
 
 class SVHNCenteredLoader(object):
-    def __init__(self, path, batch_size, train_sampler=None, test_sampler=None, use_cuda=1):
+    def __init__(self, path, batch_size, train_sampler=None, test_sampler=None,
+                 transform=None, target_transform=None, use_cuda=1):
         # first grab the datasets
         train_dataset, test_dataset = self.get_datasets(
-            path, target_transform=None #transforms.Lambda(lambda lbl: lbl - 1)
+            #path, target_transform=None #transforms.Lambda(lambda lbl: lbl - 1)
+            path, transform, target_transform
         )
 
         kwargs = {'num_workers': 2, 'pin_memory': True} if use_cuda else {}

@@ -1,3 +1,4 @@
+import os
 import torch
 import numpy as np
 from torchvision import datasets, transforms
@@ -13,9 +14,12 @@ class MergedLoader(object):
                  train_sampler=None, test_sampler=None,
                  resize=[32, 32], convert_to_rgb=True,
                  use_cuda=1):
+        fashion_lambda = lambda path, transform : FashionMNISTLoader.get_datasets(
+            path=os.path.join(path, "fashion"), transform=transform
+        )
         dataset_map = {
             'mnist': MNISTLoader.get_datasets,
-            'fashion': FashionMNISTLoader.get_datasets,
+            'fashion': fashion_lambda,
             'cifar10': CIFAR10Loader.get_datasets,
             'svhn_centered': SVHNCenteredLoader.get_datasets,
             'svhn_full': SVHNFullLoader.get_datasets,

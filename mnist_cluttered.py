@@ -49,9 +49,11 @@ class ClutteredMNISTDataset(torch.utils.data.Dataset):
 
 
 class ClutteredMNISTLoader(object):
-    def __init__(self, path, batch_size, train_sampler=None, test_sampler=None, use_cuda=1):
+    def __init__(self, path, batch_size, train_sampler=None, test_sampler=None,
+                 transform=None, target_transform=None, use_cuda=1):
         # first get the datasets
-        train_dataset, test_dataset = self.get_datasets(path)
+        train_dataset, test_dataset = self.get_datasets(path, transform,
+                                                        target_transform)
 
         kwargs = {'num_workers': 1, 'pin_memory': True} if use_cuda else {}
 
