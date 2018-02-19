@@ -11,7 +11,7 @@ from datasets.mnist_cluttered import ClutteredMNISTLoader
 from datasets.mnist import MNISTLoader
 from datasets.merger import MergedLoader
 from datasets.svhn import SVHNCenteredLoader, SVHNFullLoader
-from datasets.utils import bw_2_rgb_lambda, resize_lambda
+from datasets.utils import bw_2_rgb_lambda, resize_lambda, simple_merger
 
 
 def get_samplers(num_classes):
@@ -27,7 +27,7 @@ def get_samplers(num_classes):
 
 
 def get_rotated_loader(task, args,
-                       angles=[30, 70, 130, 200, 250],
+                       angles=[30, 70, 270],
                        num_classes=10):
     ''' returns a list of loaders that are rotated by angles '''
     loader_map = {
@@ -110,24 +110,27 @@ def get_loader(args, transform=None, target_transform=None):
                               # target_transform=target_transform,
                               use_cuda=args.cuda)
     elif '+' in task:
+        # TODO: merge this into merged loader
         loader = []
         for split in task.split('+'):
             args_clone = deepcopy(args)
             args_clone.task = [split]
 
             transform = [
-                transforms.Resize((32, 32)),
-                #transforms.Lambda(lambda img: res(img))#np.concatenate((np.asarray(img), np.asarray(img), np.asarray(img)), axis=1))
+                transforms.Resize((32, 32)), # XXX: parameterize
                 transforms.Lambda(lambda img: bw_2_rgb_lambda(img))
             ]
             loader.append(get_loader(args_clone, transform=transform))
 
     elif 'rotated' in task:
-        print("""WARN: currently rotated dataset simply
-                 returns rotations only for sequential """)
-        args_clone = deepcopy(args)
-        args_clone.task = [task.split('_')[1]]
-        return get_loader(args_clone)
+        # print("""WARN: currently rotated dataset simply
+        #          returns rotations only for sequential """)
+        # args_clone = deepcopy(args)
+        # args_clone.task = [task.split('_')[1]]
+        # return get_loader(args_clone)
+        task = task.split('_')[1]
+        loaders = get_rotated_loader(task, args)
+        loader = simple_merger(loaders, args.batch_size, args.cuda)
     else:
         raise Exception("unknown dataset provided / not supported yet")
 
