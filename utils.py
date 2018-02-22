@@ -28,6 +28,13 @@ def bw_2_rgb_lambda(img):
 
     return img.convert(mode="RGB")
 
+def binarize(img, block_size=21):
+    if not isinstance(img, (np.float32, np.float64)):
+        img = np.asarray(img)
+
+    img = cv2.adaptiveThreshold(img, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
+                                 cv2.THRESH_BINARY, block_size, 0)
+    return np.expand_dims(img, -1) if len(img.shape) < 3 else img
 
 def simple_merger(loaders, batch_size, use_cuda=False):
     print("\nWARN [simplemerger]: no process in place for handling different classes\n")

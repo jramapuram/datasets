@@ -3,11 +3,15 @@ import numpy as np
 from scipy.misc import imread, imresize
 from torchvision import datasets, transforms
 
+from datasets.utils import binarize
 
 class FashionMNISTLoader(object):
     def __init__(self, path, batch_size, train_sampler=None, test_sampler=None,
-                 transform=None, target_transform=None, use_cuda=1):
-        # first get the datasets
+                 transform=None, target_transform=None, binarize_images=True, use_cuda=1):
+        # first get the datasets, binarize fashionmnist though
+        if binarize_images:
+            transform = [binarize] if transform is None else [transform, binarize]
+
         train_dataset, test_dataset = self.get_datasets(path, transform,
                                                         target_transform)
 
