@@ -9,6 +9,7 @@ from datasets.cifar import CIFAR10Loader
 from datasets.fashion_mnist import FashionMNISTLoader
 from datasets.mnist_cluttered import ClutteredMNISTLoader
 from datasets.mnist import MNISTLoader
+from datasets.permuted_mnist import PermutedMNISTLoader
 from datasets.merger import MergedLoader
 from datasets.svhn import SVHNCenteredLoader, SVHNFullLoader
 from datasets.utils import bw_2_rgb_lambda, resize_lambda, simple_merger
@@ -77,6 +78,12 @@ def get_loader(args, transform=None, target_transform=None):
                              transform=transform,
                              target_transform=target_transform,
                              use_cuda=args.cuda)
+    elif task == 'permuted':
+        loader = PermutedMNISTLoader(path=args.data_dir,
+                                     batch_size=args.batch_size,
+                                     transform=transform,
+                                     target_transform=target_transform,
+                                     use_cuda=args.cuda)
     elif task == 'fashion':
         # NOTE: cant have MNIST & fashion in same dir, so workaround
         loader = FashionMNISTLoader(path=os.path.join(args.data_dir, "fashion"),
@@ -172,6 +179,13 @@ def get_sequential_data_loaders(args, num_classes=10):
                                         train_sampler=tr,
                                         test_sampler=te,
                                         use_cuda=args.cuda)
+                   for tr, te in zip(train_samplers, test_samplers)]
+    elif task_name == 'permuted':
+        loaders = [PermutedMNISTLoader(path=args.data_dir,
+                                       batch_size=args.batch_size,
+                                       train_sampler=tr,
+                                       test_sampler=te,
+                                       use_cuda=args.cuda)
                    for tr, te in zip(train_samplers, test_samplers)]
     elif task_name == 'svhn' or task_name == 'svhn_centered':
         loaders = [SVHNCenteredLoader(path=args.data_dir,
