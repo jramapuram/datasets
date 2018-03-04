@@ -10,6 +10,7 @@ Currently provides:
     - PermutedMNIST
     - CIFAR10
     - SVHN
+    - Omniglot
     - SVHN Original (non-centered)
     - Dataset Operators (see section below)
 

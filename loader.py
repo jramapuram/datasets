@@ -9,6 +9,7 @@ from datasets.cifar import CIFAR10Loader
 from datasets.fashion_mnist import FashionMNISTLoader
 from datasets.mnist_cluttered import ClutteredMNISTLoader
 from datasets.mnist import MNISTLoader
+from datasets.omniglot import OmniglotLoader
 from datasets.permuted_mnist import PermutedMNISTLoader
 from datasets.svhn import SVHNCenteredLoader, SVHNFullLoader
 from datasets.utils import bw_2_rgb_lambda, resize_lambda, \
@@ -19,6 +20,7 @@ PERMUTE_SEED = 1
 
 loader_map = {
     'mnist': MNISTLoader,
+    'omniglot': OmniglotLoader,
     'permuted': PermutedMNISTLoader,
     'fashion': FashionMNISTLoader,
     'clutter': ClutteredMNISTLoader,
@@ -74,8 +76,12 @@ def get_loader(args, transform=None, target_transform=None,
     task = args.task
     global PERMUTE_SEED
 
+    # overwrite data dir for fashion MNIST because it has issues being
+    # in the same directory as regular MNIST
     if task == 'fashion':
-        args.data_dir = os.path.join(args.data_dir, "fashion")
+        data_dir = os.path.join(args.data_dir, "fashion")
+    else:
+        data_dir = args.data_dir
 
     if '+' in task:  # the merge operand
         loader = []
@@ -112,7 +118,7 @@ def get_loader(args, transform=None, target_transform=None,
         if task == 'permuted':
             kwargs['seed'] = PERMUTE_SEED
 
-        return loader_map[task](path=args.data_dir,
+        return loader_map[task](path=data_dir,
                                 batch_size=args.batch_size,
                                 transform=transform,
                                 target_transform=target_transform,
@@ -134,7 +140,7 @@ def _check_for_sublist(loaders):
     return is_sublist
 
 
-def get_split_data_loaders(args, num_classes=10, transform=None, target_transform=None):
+def get_split_data_loaders(args, num_classes, transform=None, target_transform=None):
     ''' helper to return the model and the loader '''
     # we build 10 samplers as all of the below have 10 classes
     train_samplers, test_samplers = get_samplers(num_classes=num_classes)
