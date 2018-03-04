@@ -2,31 +2,28 @@ import torch
 import numpy as np
 from torchvision import datasets, transforms
 
+from datasets.utils import create_loader
+
 
 class MNISTLoader(object):
     def __init__(self, path, batch_size, train_sampler=None, test_sampler=None,
-                 transform=None, target_transform=None, use_cuda=1):
+                 transform=None, target_transform=None, use_cuda=1, **kwargs):
         # first get the datasets
         train_dataset, test_dataset = self.get_datasets(path, transform, target_transform)
 
-        kwargs = {'num_workers': 1, 'pin_memory': True} if use_cuda else {}
-        train_sampler = train_sampler(train_dataset) if train_sampler else None
-        self.train_loader = torch.utils.data.DataLoader(
-            train_dataset,
-            batch_size=batch_size,
-            drop_last=True,
-            shuffle=True if train_sampler is None else False,
-            sampler=train_sampler,
-            **kwargs)
+        # build the loaders
+        kwargs = {'num_workers': 4, 'pin_memory': True} if use_cuda else {}
+        self.train_loader = create_loader(train_dataset,
+                                          train_sampler,
+                                          batch_size,
+                                          shuffle=True if train_sampler is None else False,
+                                          **kwargs)
 
-        test_sampler = test_sampler(test_dataset) if test_sampler else None
-        self.test_loader = torch.utils.data.DataLoader(
-            test_dataset,
-            batch_size=batch_size,
-            drop_last=True,
-            shuffle=False,
-            sampler=test_sampler,
-            **kwargs)
+        self.test_loader = create_loader(test_dataset,
+                                         test_sampler,
+                                         batch_size,
+                                         shuffle=False,
+                                         **kwargs)
 
         self.output_size = 10
         self.batch_size = batch_size

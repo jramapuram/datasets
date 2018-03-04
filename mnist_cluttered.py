@@ -4,6 +4,8 @@ import torch
 from torchvision import datasets, transforms
 from torch.utils.serialization import load_lua
 
+from datasets.utils import create_loader
+
 
 def load_cluttered_mnist(path, segment='train'):
     full = load_lua(os.path.join(path, '%s.t7'%segment))
@@ -50,36 +52,24 @@ class ClutteredMNISTDataset(torch.utils.data.Dataset):
 
 class ClutteredMNISTLoader(object):
     def __init__(self, path, batch_size, train_sampler=None, test_sampler=None,
-                 transform=None, target_transform=None, use_cuda=1):
+                 transform=None, target_transform=None, use_cuda=1, **kwargs):
         # first get the datasets
         train_dataset, test_dataset = self.get_datasets(path, transform,
                                                         target_transform)
 
-        kwargs = {'num_workers': 1, 'pin_memory': True} if use_cuda else {}
+        # build the loaders
+        kwargs = {'num_workers': 4, 'pin_memory': True} if use_cuda else {}
+        self.train_loader = create_loader(train_dataset,
+                                          train_sampler,
+                                          batch_size,
+                                          shuffle=True if train_sampler is None else False,
+                                          **kwargs)
 
-        train_sampler = train_sampler(train_dataset) if train_sampler else None
-        self.train_loader = torch.utils.data.DataLoader(
-            train_dataset,
-            batch_size=batch_size,
-            drop_last=True,
-            shuffle=True if train_sampler is None else False,
-            sampler=train_sampler,
-            **kwargs)
-
-        # self.val_loader = torch.utils.data.DataLoader(
-        #     val_dataset,
-        #     batch_size=batch_size,
-        #     drop_last=True,
-        #     shuffle=False, **kwargs)
-
-        test_sampler = test_sampler(test_dataset) if test_sampler else None
-        self.test_loader = torch.utils.data.DataLoader(
-            test_dataset,
-            batch_size=batch_size,
-            drop_last=True,
-            shuffle=False,
-            sampler=test_sampler,
-            **kwargs)
+        self.test_loader = create_loader(test_dataset,
+                                         test_sampler,
+                                         batch_size,
+                                         shuffle=False,
+                                         **kwargs)
 
         self.output_size = 10
         self.batch_size = batch_size

@@ -1,7 +1,13 @@
 import cv2
 import torch
 import numpy as np
+
+from copy import deepcopy
+from PIL import Image
 from collections import namedtuple
+from torch.utils.data.sampler import SequentialSampler, RandomSampler
+
+from datasets.class_sampler import ClassSampler
 
 # simple namedtuple loader
 GenericLoader = namedtuple('GenericLoader', 'img_shp output_size train_loader test_loader')
@@ -15,6 +21,17 @@ def resize_lambda(img, size=(64, 64)):
         size = tuple(size)
 
     return cv2.resize(img, size)
+
+
+def permute_lambda(img, pixel_permutation):
+    if not isinstance(img, (np.float32, np.float64)):
+        img = np.asarray(img)
+
+    img_orig_shape = img.shape
+    return Image.fromarray(
+        img.reshape(-1, 1)[pixel_permutation].reshape(img_orig_shape)
+    )
+
 
 # def bw_2_rgb_lambda(img):
 #     if not isinstance(img, (np.float32, np.float64)):
@@ -69,3 +86,40 @@ def simple_merger(loaders, batch_size, use_cuda=False):
                          output_size,
                          train_loader,
                          test_loader)
+
+
+def create_loader(dataset, sampler, batch_size, shuffle, **kwargs):
+    if sampler is not None and \
+       not isinstance(sampler, (SequentialSampler, RandomSampler)):
+        # re-run the operand to extract indices
+        # XXX: might be another sampler, cant
+        #      directly check due to lambda
+        sampler = sampler(dataset)
+        dataset = sampler.dataset
+        sampler = None
+
+    return torch.utils.data.DataLoader(
+        dataset,
+        batch_size=batch_size,
+        drop_last=True,
+        shuffle=shuffle,
+        sampler=sampler,
+        **kwargs)
+
+def sequential_test_set_merger(loaders):
+    test_dataset = [loaders[0].test_loader.dataset]
+    for loader in loaders[1:]:
+        current_clone = deepcopy(loader.test_loader.dataset)
+        for td in test_dataset:
+            loader.test_loader.dataset += td
+
+        # re-create the test loader
+        # in order to get correct samples
+        loader.test_loader \
+            = create_loader(loader.test_loader.dataset,
+                            None, #loader.test_loader.sampler,
+                            loader.batch_size,
+                            shuffle=False)
+        test_dataset.append(current_clone)
+
+    return loaders

@@ -1,6 +1,7 @@
 import math
 import torch
-from torch.utils.data.dataset import Dataset
+import numpy as np
+from torch.utils.data.dataset import Dataset, Subset
 from torch.utils.data.sampler import Sampler, SubsetRandomSampler
 
 
@@ -19,8 +20,15 @@ class ClassSampler(Sampler):
 
     def __init__(self, dataset, class_number):
         assert class_number is not None
-        self.dataset = dataset
         self.class_number = class_number
+
+        # place in call to provide compatibility
+        self.__call__(dataset, class_number=class_number)
+
+    def __call__(self, dataset, class_number=None):
+        ''' helps to recompute indices '''
+        if class_number is None:
+            class_number = self.class_number
 
         # if we receive a list, then iterate over this sequentially
         if isinstance(class_number, list):
@@ -33,13 +41,15 @@ class ClassSampler(Sampler):
         else:
             self.indices, self.num_samples = self._calc_indices(dataset, class_number)
 
+        # set the current dataset as a subset
+        self.dataset = Subset(dataset, self.indices)
+        # print("#indices for {} = {} | dataset = {}".format(self.class_number,
+        #                                                    len(self.indices),
+        #                                                    len(self.dataset)))
+
     @staticmethod
     def _calc_indices(dataset, class_number):
-        indices = []
-        for i, (_, target) in enumerate(dataset):
-            if target == class_number:
-                indices.append(i)
-
+        indices = [i for i, (_, target) in enumerate(dataset) if target == class_number]
         return indices, len(indices)
 
     def __iter__(self):

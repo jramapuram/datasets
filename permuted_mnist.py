@@ -2,31 +2,47 @@ import torch
 import numpy as np
 from torchvision import datasets, transforms
 
+from datasets.utils import permute_lambda, create_loader
+
+
+def generate_permutation(seed):
+    orig_seed = np.random.get_state()
+    np.random.seed(seed)
+    # print("USING SEED ", seed)
+    perms = np.random.permutation(28*28)
+    np.random.set_state(orig_seed)
+    return perms
+
 
 class PermutedMNISTLoader(object):
     def __init__(self, path, batch_size, train_sampler=None, test_sampler=None,
-                 transform=None, target_transform=None, use_cuda=1):
-        # first get the datasets
+                 transform=None, target_transform=None, use_cuda=1, **kwargs):
+        # generate the unique permutation for this loader
+        seed = np.random.randint(1, 9999) if 'seed' not in kwargs else kwargs['seed']
+        perm = generate_permutation(seed)
+        perm_transform = PermutedMNISTLoader._get_permutation_lambda(perm)
+        if transform is not None:
+            if isinstance(transform, list):
+                transform.insert(0, perm_transform)
+        else:
+            transform = [perm_transform]
+
+        # get the datasets
         train_dataset, test_dataset = self.get_datasets(path, transform, target_transform)
 
-        kwargs = {'num_workers': 1, 'pin_memory': True} if use_cuda else {}
-        train_sampler = train_sampler(train_dataset) if train_sampler else None
-        self.train_loader = torch.utils.data.DataLoader(
-            train_dataset,
-            batch_size=batch_size,
-            drop_last=True,
-            shuffle=True if train_sampler is None else False,
-            sampler=train_sampler,
-            **kwargs)
+        # build the loaders
+        kwargs = {'num_workers': 4, 'pin_memory': True} if use_cuda else {}
+        self.train_loader = create_loader(train_dataset,
+                                          train_sampler,
+                                          batch_size,
+                                          shuffle=True if train_sampler is None else False,
+                                          **kwargs)
 
-        test_sampler = test_sampler(test_dataset) if test_sampler else None
-        self.test_loader = torch.utils.data.DataLoader(
-            test_dataset,
-            batch_size=batch_size,
-            drop_last=True,
-            shuffle=False,
-            sampler=test_sampler,
-            **kwargs)
+        self.test_loader = create_loader(test_dataset,
+                                         test_sampler,
+                                         batch_size,
+                                         shuffle=False,
+                                         **kwargs)
 
         self.output_size = 10
         self.batch_size = batch_size
@@ -38,9 +54,8 @@ class PermutedMNISTLoader(object):
         #print("derived image shape = ", self.img_shp)
 
     @staticmethod
-    def _get_permutation_lambda():
-        pixel_permutation = torch.randperm(28*28)         # add the permutation
-        return transforms.Lambda(lambda x: x.view(-1,1)[pixel_permutation].view(1, 28, 28))
+    def _get_permutation_lambda(pixel_permutation):
+        return transforms.Lambda(lambda x: permute_lambda(x, pixel_permutation=pixel_permutation))
 
     @staticmethod
     def get_datasets(path, transform=None, target_transform=None):
@@ -52,7 +67,6 @@ class PermutedMNISTLoader(object):
             transform_list.extend(transform)
 
         transform_list.append(transforms.ToTensor())
-        transform_list.append(PermutedMNISTLoader._get_permutation_lambda())
         train_dataset = datasets.MNIST(path, train=True, download=True,
                                        transform=transforms.Compose(transform_list),
                                        target_transform=target_transform)
