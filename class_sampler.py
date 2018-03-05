@@ -18,12 +18,10 @@ class ClassSampler(Sampler):
                       multiple classes.
     """
 
-    def __init__(self, dataset, class_number):
+    def __init__(self, class_number, shuffle=True):
         assert class_number is not None
         self.class_number = class_number
-
-        # place in call to provide compatibility
-        self.__call__(dataset, class_number=class_number)
+        self.shuffle = shuffle
 
     def __call__(self, dataset, class_number=None):
         ''' helps to recompute indices '''
@@ -41,11 +39,14 @@ class ClassSampler(Sampler):
         else:
             self.indices, self.num_samples = self._calc_indices(dataset, class_number)
 
-        # set the current dataset as a subset
-        self.dataset = Subset(dataset, self.indices)
+        # DEBUG print:
         # print("#indices for {} = {} | dataset = {}".format(self.class_number,
         #                                                    len(self.indices),
         #                                                    len(self.dataset)))
+
+        # set the current dataset as a subset
+        self.dataset = Subset(dataset, self.indices)
+        return self.dataset
 
     @staticmethod
     def _calc_indices(dataset, class_number):
@@ -53,10 +54,11 @@ class ClassSampler(Sampler):
         return indices, len(indices)
 
     def __iter__(self):
-        return (self.indices[i] for i in torch.randperm(len(self.indices)))
+        assert hasattr(self, 'indices'), "need to run __call__() on ClassSampler first"
+        if self.shuffle:
+            return (self.indices[i] for i in torch.randperm(len(self.indices)))
+
+        return (self.indices[i] for i in range(len(self.indices)))
 
     def __len__(self):
         return self.num_samples
-
-    def set_epoch(self, epoch):
-        self.epoch = epoch

@@ -89,13 +89,10 @@ def simple_merger(loaders, batch_size, use_cuda=False):
 
 
 def create_loader(dataset, sampler, batch_size, shuffle, **kwargs):
-    if sampler is not None and \
-       not isinstance(sampler, (SequentialSampler, RandomSampler)):
-        # re-run the operand to extract indices
-        # XXX: might be another sampler, cant
-        #      directly check due to lambda
-        sampler = sampler(dataset)
-        dataset = sampler.dataset
+    if isinstance(sampler, ClassSampler):
+        # our sampler is hacky; just filters dataset
+        # and nulls itself out for GC
+        dataset = sampler(dataset)
         sampler = None
 
     return torch.utils.data.DataLoader(
@@ -119,7 +116,7 @@ def sequential_test_set_merger(loaders):
             = create_loader(loader.test_loader.dataset,
                             None, #loader.test_loader.sampler,
                             loader.batch_size,
-                            shuffle=False)
+                            shuffle=True)
         test_dataset.append(current_clone)
 
     return loaders

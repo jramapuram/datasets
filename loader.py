@@ -33,10 +33,12 @@ loader_map = {
 def get_samplers(num_classes):
     ''' builds samplers taking into account previous classes'''
     # NOTE: test datasets are now merged via sequential_test_set_merger
-    test_samplers = [lambda x, j=j: ClassSampler(x, class_number=j)
-                     for j in range(num_classes)]
-    train_samplers = [lambda x, j=j: ClassSampler(x, class_number=j)
-                      for j in range(num_classes)]
+    # test_samplers = [lambda x, j=j: ClassSampler(x, class_number=j)
+    #                  for j in range(num_classes)]
+    # train_samplers = [lambda x, j=j: ClassSampler(x, class_number=j)
+    #                   for j in range(num_classes)]
+    test_samplers = [ClassSampler(class_number=j, shuffle=False) for j in range(num_classes)]
+    train_samplers = [ClassSampler(class_number=j, shuffle=True) for j in range(num_classes)]
     return train_samplers, test_samplers
 
 
