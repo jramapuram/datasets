@@ -142,7 +142,8 @@ def _check_for_sublist(loaders):
     return is_sublist
 
 
-def get_split_data_loaders(args, num_classes, transform=None, target_transform=None):
+def get_split_data_loaders(args, num_classes, transform=None,
+                           target_transform=None, sequentially_merge_test=True):
     ''' helper to return the model and the loader '''
     # we build 10 samplers as all of the below have 10 classes
     train_samplers, test_samplers = get_samplers(num_classes=num_classes)
@@ -171,6 +172,7 @@ def get_split_data_loaders(args, num_classes, transform=None, target_transform=N
                               target_transform=target_transform,
                               train_sampler=tr,
                               test_sampler=te,
+                              sequentially_merge_test=False,
                               increment_seed=False)
                    for tr, te in zip(train_samplers, test_samplers)]
 
@@ -178,4 +180,7 @@ def get_split_data_loaders(args, num_classes, transform=None, target_transform=N
         loaders = [item for sublist in loaders for item in sublist]
 
     PERMUTE_SEED = 1
-    return sequential_test_set_merger(loaders)
+    if sequentially_merge_test: # merge test sets sequentially
+        return sequential_test_set_merger(loaders)
+
+    return loaders

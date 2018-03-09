@@ -12,7 +12,6 @@ from datasets.class_sampler import ClassSampler
 # simple namedtuple loader
 GenericLoader = namedtuple('GenericLoader', 'img_shp output_size train_loader test_loader')
 
-
 def resize_lambda(img, size=(64, 64)):
     if not isinstance(img, (np.float32, np.float64)):
         img = np.asarray(img)
@@ -115,7 +114,7 @@ def sequential_test_set_merger(loaders):
         loader.test_loader \
             = create_loader(loader.test_loader.dataset,
                             None, #loader.test_loader.sampler,
-                            loader.batch_size,
+                            loader.test_loader.batch_size,
                             shuffle=True)
         test_dataset.append(current_clone)
 
