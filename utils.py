@@ -5,12 +5,17 @@ import numpy as np
 from copy import deepcopy
 from PIL import Image
 from collections import namedtuple
-from torch.utils.data.sampler import SequentialSampler, RandomSampler
+from torch.utils.data.dataset import Subset
 
 from datasets.class_sampler import ClassSampler
 
-# simple namedtuple loader
-GenericLoader = namedtuple('GenericLoader', 'img_shp output_size train_loader test_loader')
+# simple struct to hold properties of a loader
+class GenericLoader(object):
+    def __init__(self, img_shp, output_size, train_loader, test_loader):
+        self.img_shp = img_shp
+        self.output_size = output_size
+        self.train_loader = train_loader
+        self.test_loader = test_loader
 
 def resize_lambda(img, size=(64, 64)):
     if not isinstance(img, (np.float32, np.float64)):
@@ -102,6 +107,7 @@ def create_loader(dataset, sampler, batch_size, shuffle, **kwargs):
         sampler=sampler,
         **kwargs)
 
+
 def sequential_test_set_merger(loaders):
     test_dataset = [loaders[0].test_loader.dataset]
     for loader in loaders[1:]:
@@ -119,3 +125,19 @@ def sequential_test_set_merger(loaders):
         test_dataset.append(current_clone)
 
     return loaders
+
+
+def trim_samples_in_loader(loader, num_samples, rand_selection=True, cuda=False):
+    '''trims the samples in the loader to be num_samples
+       by random indices (rand_selection=True) or first num_samples'''
+    num_total_samples = len(loader.dataset)
+    assert num_total_samples > num_samples
+    indices = torch.randperm(num_total_samples)[0:num_samples] if rand_selection \
+              else torch.arange(num_samples)
+    loader.dataset = Subset(loader.dataset, indices)
+    kwargs = {'num_workers': 4, 'pin_memory': True} if cuda else {}
+    shuffle = True if rand_selection else False
+    loader = create_loader(loader.dataset, sampler=None,
+                           batch_size=num_samples,
+                           shuffle=shuffle, **kwargs)
+    return loader
