@@ -1,11 +1,13 @@
 import os
 import cv2
 import torch
+import numpy as np
+
+from PIL import Image
 from torchvision import datasets, transforms
 from torch.utils.serialization import load_lua
 
 from datasets.utils import create_loader
-
 
 def load_cluttered_mnist(path, segment='train'):
     full = load_lua(os.path.join(path, '%s.t7'%segment))
@@ -13,14 +15,15 @@ def load_cluttered_mnist(path, segment='train'):
     labels = []
     for t in full:
         _, index = torch.max(t[1], 0)
-        labels.append(index)
+        labels.append(index.unsqueeze(0))
 
     return [torch.cat(data).type(torch.FloatTensor).numpy(),
-            torch.cat(labels).type(torch.LongTensor).numpy()]
+            torch.cat(labels).squeeze().type(torch.LongTensor).numpy()]
 
 
 class ClutteredMNISTDataset(torch.utils.data.Dataset):
     def __init__(self, path, segment='train', transform=None, target_transform=None):
+
         self.path = os.path.expanduser(path)
         self.transform = transform
         self.target_transform = target_transform
@@ -32,18 +35,22 @@ class ClutteredMNISTDataset(torch.utils.data.Dataset):
     def _load_from_path(self):
         # load the tensor dataset from it's t7 binaries
         imgs, labels =  load_cluttered_mnist(self.path, segment=self.segment)
-        print("imgs_%s = "%self.segment, imgs.size(),
-              " | lbl_%s = "%self.segment, labels.size())
+        print("imgs_%s = "%self.segment, imgs.shape,
+              " | lbl_%s = "%self.segment, labels.shape)
         return imgs, labels
 
     def __getitem__(self, index):
         img, target = self.imgs[index], self.labels[index]
+        img = Image.fromarray(np.uint8(img.squeeze()*255))
+        #img = np.transpose(img, (1, 2, 0))
         if self.transform is not None:
             img = self.transform(img)
 
         if self.target_transform is not None:
             target = self.target_transform(target)
 
+        #img = np.transpose(img, (1, 2, 0))
+        #img = Image.fromarray(np.uint8(img*255))
         return img, target
 
     def __len__(self):
@@ -73,8 +80,7 @@ class ClutteredMNISTLoader(object):
 
         self.output_size = 10
         self.batch_size = batch_size
-        #self.img_shp = [28, 28]
-        self.img_shp = [100, 100]
+        self.img_shp = [1, 100, 100]
 
     @staticmethod
     def get_datasets(path, transform=None, target_transform=None):
