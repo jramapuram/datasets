@@ -13,6 +13,7 @@ from .omniglot import OmniglotLoader
 from .permuted_mnist import PermutedMNISTLoader
 from .svhn import SVHNCenteredLoader, SVHNFullLoader
 from .imagefolder import ImageFolderLoader
+from .multi_imagefolder import MultiImageFolderLoader
 from .utils import bw_2_rgb_lambda, resize_lambda, \
     simple_merger, sequential_test_set_merger
 
@@ -29,7 +30,8 @@ loader_map = {
     'svhn': SVHNCenteredLoader,
     'svhn_centered': SVHNCenteredLoader,
     'svhn_full': SVHNFullLoader,
-    'image_folder': ImageFolderLoader
+    'image_folder': ImageFolderLoader,
+    'multi_image_folder': MultiImageFolderLoader
 }
 
 def get_samplers(num_classes):
@@ -121,6 +123,11 @@ def get_loader(args, transform=None, target_transform=None,
         kwargs = {}
         if task == 'permuted':
             kwargs['seed'] = PERMUTE_SEED
+
+        if hasattr(args, 'output_size'):
+            # for imageloader mainly
+            # TODO: pass **args in as kwargs
+            kwargs['output_size'] = args.output_size
 
         return loader_map[task](path=data_dir,
                                 batch_size=args.batch_size,

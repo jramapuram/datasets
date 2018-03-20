@@ -1,3 +1,4 @@
+import os
 import torch
 import numpy as np
 from torchvision import datasets, transforms
@@ -12,18 +13,18 @@ class ImageFolderLoader(object):
         train_dataset, test_dataset = self.get_datasets(path, transform, target_transform)
 
         # build the loaders
-        kwargs = {'num_workers': 4, 'pin_memory': True} if use_cuda else {}
+        kwargs_loader = {'num_workers': 4, 'pin_memory': True} if use_cuda else {}
         self.train_loader = create_loader(train_dataset,
                                           train_sampler,
                                           batch_size,
                                           shuffle=True if train_sampler is None else False,
-                                          **kwargs)
+                                          **kwargs_loader)
 
         self.test_loader = create_loader(test_dataset,
                                          test_sampler,
                                          batch_size,
                                          shuffle=False,
-                                         **kwargs)
+                                         **kwargs_loader)
         self.batch_size = batch_size
         self.output_size = 0
 
@@ -31,9 +32,20 @@ class ImageFolderLoader(object):
         # but just one image to get the image sizing
         test_img, _ = self.train_loader.__iter__().__next__()
         self.img_shp = list(test_img.size()[1:])
-        for _, label in self.train_loader:
-            if label > self.output_size:
-                self.output_size = label
+        if 'output_size' not in kwargs:
+            for _, label in self.train_loader:
+                if not isinstance(label, (float, int))\
+                   and len(label) > 1:
+                    for l in label:
+                        if l > self.output_size:
+                            self.output_size = l
+                else:
+                    if label > self.output_size:
+                        self.output_size = label
+
+            self.output_size = self.output_size[0] + 1 # Longtensor --> int
+        else:
+            self.output_size = kwargs['output_size']
 
         print("determined output_size: ", self.output_size)
 
@@ -47,10 +59,10 @@ class ImageFolderLoader(object):
             transform_list.extend(transform)
 
         transform_list.append(transforms.ToTensor())
-        train_dataset = datasets.ImageFolder(root=os.join(path, 'train'),
+        train_dataset = datasets.ImageFolder(root=os.path.join(path, 'train'),
                                              transform=transforms.Compose(transform_list),
                                              target_transform=target_transform)
-        test_dataset = datasets.ImageFolder(root=os.join(path, 'test'),
+        test_dataset = datasets.ImageFolder(root=os.path.join(path, 'test'),
                                             transform=transforms.Compose(transform_list),
                                             target_transform=target_transform)
         return train_dataset, test_dataset
