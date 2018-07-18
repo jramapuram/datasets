@@ -37,6 +37,54 @@ def permute_lambda(img, pixel_permutation):
     )
 
 
+def normalize_images(imgs, mu=None, sigma=None, eps=1e-9):
+    ''' normalize imgs with provided mu /sigma
+        or computes them and returns with the normalized
+       images and tabulated mu / sigma'''
+    if mu is None:
+        if len(imgs.shape) == 4:
+            chans = imgs.shape[1]
+            mu = np.asarray(
+                [np.mean(imgs[:, i, :, :]) for i in range(chans)]
+            ).reshape(1, -1, 1, 1)
+        elif len(imgs.shape) == 5:  # glimpses
+            chans = imgs.shape[2]
+            mu = np.asarray(
+                [np.mean(imgs[:, :, i, :, :]) for i in range(chans)]
+            ).reshape(1, 1, -1, 1, 1)
+            sigma = np.asarray(
+                [np.std(imgs[:, :, i, :, :]) for i in range(chans)]
+            ).reshape(1, 1, -1, 1, 1)
+        else:
+            raise Exception("unknown number of dims for normalization")
+
+    if sigma is None:
+        if len(imgs.shape) == 4:
+            chans = imgs.shape[1]
+            sigma = np.asarray(
+                [np.std(imgs[:, i, :, :]) for i in range(chans)]
+            ).reshape(1, -1, 1, 1)
+        elif len(imgs.shape) == 5:  # glimpses
+            chans = imgs.shape[2]
+            sigma = np.asarray(
+                [np.std(imgs[:, :, i, :, :]) for i in range(chans)]
+            ).reshape(1, 1, -1, 1, 1)
+        else:
+            raise Exception("unknown number of dims for normalization")
+
+    return (imgs - mu) / (sigma + eps), [mu, sigma]
+
+
+def normalize_train_test_images(train_imgs, test_imgs, eps=1e-9):
+    ''' simple helper to take train and test images
+        and normalize the test images by the train mu/sigma '''
+    assert len(train_imgs.shape) == len(test_imgs.shape) >= 4
+
+    train_imgs , [mu, sigma] = normalize_images(train_imgs, eps=eps)
+    return [train_imgs,
+            (test_imgs - mu) / (sigma + eps)]
+
+
 # def bw_2_rgb_lambda(img):
 #     if not isinstance(img, (np.float32, np.float64)):
 #         img = np.asarray(img)

@@ -4,6 +4,7 @@ import numpy as np
 import torchvision.transforms as transforms
 from copy import deepcopy
 
+from .all_pairs.grid_loader import GridDataLoader
 from .class_sampler import ClassSampler
 from .cifar import CIFAR10Loader
 from .fashion_mnist import FashionMNISTLoader
@@ -21,6 +22,7 @@ from .utils import bw_2_rgb_lambda, resize_lambda, \
 PERMUTE_SEED = 1
 
 loader_map = {
+    'all_pairs': GridDataLoader,
     'mnist': MNISTLoader,
     'omniglot': OmniglotLoader,
     'permuted': PermutedMNISTLoader,
