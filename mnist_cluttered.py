@@ -7,7 +7,7 @@ from PIL import Image
 from torchvision import datasets, transforms
 from torch.utils.serialization import load_lua
 
-from datasets.utils import create_loader
+from datasets.utils import create_loader, normalize_train_test_images
 
 def load_cluttered_mnist(path, segment='train'):
     full = load_lua(os.path.join(path, '%s.t7'%segment))
@@ -63,6 +63,11 @@ class ClutteredMNISTLoader(object):
         # first get the datasets
         train_dataset, test_dataset = self.get_datasets(path, transform,
                                                         target_transform)
+
+        # normalize the images
+        # train_dataset.imgs, test_dataset.imgs = normalize_train_test_images(
+        #     train_dataset.imgs, test_dataset.imgs
+        # )
 
         # build the loaders
         kwargs = {'num_workers': 4, 'pin_memory': True} if use_cuda else {}
