@@ -2,6 +2,7 @@ import os
 import gc
 import torch
 import numpy as np
+import multiprocessing
 import torchvision.transforms.functional as F
 
 from PIL import Image
@@ -131,9 +132,10 @@ class MultiImageFolderLoader(object):
                                                         **kwargs)
 
         # build the loaders, note that pinning memory **deadlocks** this loader!
-        # kwargs_loader = {'num_workers': 4, 'pin_memory': True, 'collate_fn': collate} \
-        #     if use_cuda else {'collate_fn': collate}
-        kwargs_loader = {'num_workers': 4, 'pin_memory': True} if use_cuda else {}
+        #kwargs_loader = {'num_workers': 4, 'pin_memory': True} if use_cuda else {}
+
+        kwargs_loader = {'num_workers': multiprocessing.cpu_count(),
+                         'pin_memory': True} if use_cuda else {}
         self.train_loader = create_loader(train_dataset,
                                           train_sampler,
                                           batch_size,
@@ -156,20 +158,21 @@ class MultiImageFolderLoader(object):
         print("determined img_size: ", self.img_shp)
 
         # iterate over the entire dataset to find the max label
-        if 'output_size' not in kwargs:
-            for _, label in self.train_loader:
-                if not isinstance(label, (float, int))\
-                   and len(label) > 1:
-                    for l in label:
-                        if l > self.output_size:
-                            self.output_size = l
-                else:
-                    if label > self.output_size:
-                        self.output_size = label
+        # if 'output_size' not in kwargs:
+        #     for _, label in self.train_loader:
+        #         if not isinstance(label, (float, int))\
+        #            and len(label) > 1:
+        #             for l in label:
+        #                 if l > self.output_size:
+        #                     self.output_size = l
+        #         else:
+        #             if label > self.output_size:
+        #                 self.output_size = label
 
-            self.output_size = self.output_size.item() + 1 # Longtensor --> int
-        else:
-            self.output_size = kwargs['output_size']
+        #     self.output_size = self.output_size.item() + 1 # Longtensor --> int
+        # else:
+        #     self.output_size = kwargs['output_size']
+        self.output_size = 10
 
         print("determined output_size: ", self.output_size)
 

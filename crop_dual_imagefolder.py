@@ -232,7 +232,7 @@ class CropDualImageFolderLoader(object):
                                                         **kwargs)
 
         # build the loaders, note that pinning memory **deadlocks** this loader!
-        kwargs_loader = {'num_workers': 4, 'pin_memory': True, 'collate_fn': collate} \
+        kwargs_loader = {'num_workers': 4, 'pin_memory': False, 'collate_fn': collate} \
             if use_cuda else {'collate_fn': collate}
         self.train_loader = create_loader(train_dataset,
                                           train_sampler,
