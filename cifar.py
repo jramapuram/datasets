@@ -3,7 +3,7 @@ import numpy as np
 from scipy.misc import imread, imresize
 from torchvision import datasets, transforms
 
-from datasets.utils import create_loader
+from .utils import create_loader
 
 def resize_lambda(img, size=(64, 64)):
     return imresize(img, size)

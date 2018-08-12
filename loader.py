@@ -4,6 +4,7 @@ import numpy as np
 import torchvision.transforms as transforms
 from copy import deepcopy
 
+from .crop_dual_imagefolder import CropDualImageFolderLoader
 from .all_pairs.grid_loader import GridDataLoader
 from .class_sampler import ClassSampler
 from .cifar import CIFAR10Loader
@@ -23,6 +24,7 @@ PERMUTE_SEED = 1
 
 loader_map = {
     'all_pairs': GridDataLoader,
+    'crop_dual_imagefolder': CropDualImageFolderLoader,
     'mnist': MNISTLoader,
     'omniglot': OmniglotLoader,
     'permuted': PermutedMNISTLoader,
@@ -78,7 +80,8 @@ def get_rotated_loader(task, args,
 
 def get_loader(args, transform=None, target_transform=None,
                train_sampler=None, test_sampler=None,
-               increment_seed=True, sequentially_merge_test=True):
+               increment_seed=True, sequentially_merge_test=True,
+               **kwargs):
     ''' increment_seed: increases permutation rng seed,
         sequentially_merge_test: merge all the test sets sequentially '''
     task = args.task
@@ -106,7 +109,7 @@ def get_loader(args, transform=None, target_transform=None,
             if transform is not None and isinstance(transform, list):
                 transform_list = transform + transform_list
 
-            loader.append(get_loader(args_clone, transform=transform))
+            loader.append(get_loader(args_clone, transform=transform, **kwargs))
             if increment_seed:
                 PERMUTE_SEED += 1
 
@@ -122,7 +125,6 @@ def get_loader(args, transform=None, target_transform=None,
             #loader = simple_merger(loader, args.batch_size, args.cuda)
     else:
         assert task in loader_map, "unknown task requested"
-        kwargs = {}
         if task == 'permuted':
             kwargs['seed'] = PERMUTE_SEED
 
@@ -154,7 +156,7 @@ def _check_for_sublist(loaders):
 
 
 def get_split_data_loaders(args, num_classes, transform=None,
-                           target_transform=None, sequentially_merge_test=True):
+                           target_transform=None, sequentially_merge_test=True, **kwargs):
     ''' helper to return the model and the loader '''
     # we build 10 samplers as all of the below have 10 classes
     train_samplers, test_samplers = get_samplers(num_classes=num_classes)
@@ -172,7 +174,8 @@ def get_split_data_loaders(args, num_classes, transform=None,
                            train_sampler=tr,
                            test_sampler=te,
                            increment_seed=False,
-                           sequentially_merge_test=False)
+                           sequentially_merge_test=False,
+                           **kwargs)
                 for tr, te in zip(train_samplers, test_samplers)]
             )
             PERMUTE_SEED += 1
@@ -184,7 +187,7 @@ def get_split_data_loaders(args, num_classes, transform=None,
                               train_sampler=tr,
                               test_sampler=te,
                               sequentially_merge_test=False,
-                              increment_seed=False)
+                              increment_seed=False, **kwargs)
                    for tr, te in zip(train_samplers, test_samplers)]
 
     if _check_for_sublist(loaders):

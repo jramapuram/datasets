@@ -2,8 +2,8 @@ from __future__ import print_function
 import torch
 from torchvision import datasets, transforms
 
-from datasets.svhn_full import SVHNFull
-from datasets.utils import create_loader
+from .svhn_full import SVHNFull
+from .utils import create_loader
 
 
 class SVHNFullLoader(object):

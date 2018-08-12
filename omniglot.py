@@ -7,7 +7,7 @@ from os.path import join
 from torchvision.datasets.utils import download_url, check_integrity
 
 
-from datasets.utils import create_loader
+from .utils import create_loader
 
 
 class OmniglotLoader(object):

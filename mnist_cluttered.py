@@ -7,7 +7,7 @@ from PIL import Image
 from torchvision import datasets, transforms
 from torch.utils.serialization import load_lua
 
-from datasets.utils import create_loader, normalize_train_test_images
+from .utils import create_loader, normalize_train_test_images
 
 def load_cluttered_mnist(path, segment='train'):
     full = load_lua(os.path.join(path, '%s.t7'%segment))

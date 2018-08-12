@@ -3,7 +3,7 @@ import numpy as np
 from scipy.misc import imread, imresize
 from torchvision import datasets, transforms
 
-from datasets.utils import binarize, create_loader
+from .utils import binarize, create_loader
 
 
 class FashionMNISTLoader(object):

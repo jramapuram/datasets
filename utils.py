@@ -7,7 +7,7 @@ from PIL import Image
 from collections import namedtuple
 from torch.utils.data.dataset import Subset
 
-from datasets.class_sampler import ClassSampler
+from .class_sampler import ClassSampler
 
 # simple struct to hold properties of a loader
 class GenericLoader(object):

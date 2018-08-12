@@ -2,7 +2,7 @@ import torch
 import numpy as np
 from torchvision import datasets, transforms
 
-from datasets.utils import create_loader
+from .utils import create_loader
 
 
 class MNISTLoader(object):

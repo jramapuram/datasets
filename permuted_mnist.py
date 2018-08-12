@@ -2,7 +2,7 @@ import torch
 import numpy as np
 from torchvision import datasets, transforms
 
-from datasets.utils import permute_lambda, create_loader
+from .utils import permute_lambda, create_loader
 
 
 def generate_permutation(seed):

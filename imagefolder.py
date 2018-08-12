@@ -3,7 +3,7 @@ import torch
 import numpy as np
 from torchvision import datasets, transforms
 
-from datasets.utils import create_loader
+from .utils import create_loader
 
 
 class ImageFolderLoader(object):
@@ -32,6 +32,7 @@ class ImageFolderLoader(object):
         # but just one image to get the image sizing
         test_img, _ = self.train_loader.__iter__().__next__()
         self.img_shp = list(test_img.size()[1:])
+        print("determined img_size: ", self.img_shp)
         if 'output_size' not in kwargs:
             for _, label in self.train_loader:
                 if not isinstance(label, (float, int))\
@@ -43,7 +44,7 @@ class ImageFolderLoader(object):
                     if label > self.output_size:
                         self.output_size = label
 
-            self.output_size = self.output_size[0] + 1 # Longtensor --> int
+            self.output_size = self.output_size.item() + 1 # Longtensor --> int
         else:
             self.output_size = kwargs['output_size']
 
