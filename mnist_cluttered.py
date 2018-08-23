@@ -1,5 +1,7 @@
 import os
 import cv2
+cv2.setNumThreads(0)
+
 import torch
 import numpy as np
 

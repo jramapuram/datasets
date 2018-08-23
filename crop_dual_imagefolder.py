@@ -4,11 +4,13 @@ import torch
 import numpy as np
 import torchvision.transforms.functional as F
 
+import random
+random.seed(1234) # fix the seed for shuffling
+
 from PIL import Image
 from copy import deepcopy
 from torchvision import datasets, transforms
 from torch.utils.data.dataloader import default_collate
-from multiprocessing import Process, Queue, Pool
 from contextlib import contextmanager
 from joblib import Parallel, delayed
 #from loky import get_reusable_executor
@@ -18,15 +20,13 @@ from .utils import create_loader
 try:
     import pyvips
     # pyvips.leak_set(True)
-    # pyvips.cache_set_max_mem(10000)
     pyvips.cache_set_max(0)
     USE_PYVIPS = True
     # print("using VIPS backend")
-except e:
+except:
     # print("failure to load VIPS: using PIL backend")
     USE_PYVIPS = False
 
-#USE_PYVIPS = False
 # import pytiff
 
 def collate(batch):
@@ -58,7 +58,7 @@ class CropLambdaPool(object):
 
     def __call__(self, list_of_lambdas, z_vec):
         #n_jobs=1 disables parallelization: return Parallel(n_jobs=1)(
-        return Parallel(n_jobs=len(list_of_lambdas), timeout=300)(
+        return Parallel(n_jobs=self.num_workers, timeout=300)(
             delayed(self._apply)(list_of_lambdas[i], np.ascontiguousarray(z_vec[i]))
             for i in range(len(list_of_lambdas)))
 
@@ -79,9 +79,9 @@ class CropLambda(object):
     def scale(self, val, newmin, newmax):
         return (((val) * (newmax - newmin)) / (1.0)) + newmin
 
-    def __call__(self, crop, transform=None):
-        img = self.__call_pyvips__(crop) if USE_PYVIPS is True \
-            else self.__call_PIL__(crop)
+    def __call__(self, crop, transform=None, override=False):
+        img = self.__call_pyvips__(crop, override) if USE_PYVIPS is True \
+            else self.__call_PIL__(crop, override)
 
         if transform is not None:
             return F.to_tensor(transform(img))
@@ -115,13 +115,14 @@ class CropLambda(object):
     #         return handle
     #         part = handle[100:200, :]
 
-    def __call_PIL__(self, crop):
+    def __call_PIL__(self, crop, override):
         ''' converts [crop_center, x, y] to a 4-tuple
             defining the left, upper, right, and lower
             pixel coordinate and return a lambda '''
         with open(self.path, 'rb') as f:
             with Image.open(f) as img:
                 img_size = np.array(img.size) # numpy-ize the img size (tuple)
+                self.max_img_percent = 1.0 if override is True else self.max_img_percent
                 x, y, crop_size = self._get_crop_sizing_and_centers(crop, img_size)
 
                 # crop the actual image and then upsample it to window_size
@@ -130,7 +131,7 @@ class CropLambda(object):
                 crop_img = img.crop((x, y, x + crop_size[0], y + crop_size[1]))
                 return crop_img.resize((self.window_size, self.window_size), resample=2)
 
-    def __call_pyvips__(self, crop):
+    def __call_pyvips__(self, crop, override):
         ''' converts [crop_center, x, y] to a 4-tuple
             defining the left, upper, right, and lower
             pixel coordinate and return a lambda '''
@@ -140,6 +141,7 @@ class CropLambda(object):
         assert (img_size > 0).any(), "image [{}] had height[{}] and width[{}]".format(self.path, img.height, img.width)
 
         # get the crop dims
+        self.max_img_percent = 1.0 if override is True else self.max_img_percent
         x, y, crop_size = self._get_crop_sizing_and_centers(crop, img_size)
 
         # crop the actual image and then upsample it to window_size
@@ -180,6 +182,10 @@ class CropDualImageFolder(datasets.ImageFolder):
         self.postfix = kwargs['postfix']
         self.window_size = kwargs['window_size']
         self.max_img_percent = kwargs['max_img_percent']
+
+        # sort the images otherwise we will always read a folder at a time
+        # this is problematic for the test-loader which generally doesnt shuffle!
+        random.shuffle(self.imgs)
 
         # determine the extension replacement
         # eg: small is .png, large is .tiff for pyramid tiff

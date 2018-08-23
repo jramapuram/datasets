@@ -2,14 +2,15 @@ import os
 import gc
 import torch
 import numpy as np
-import multiprocessing
 import torchvision.transforms.functional as F
+
+import random
+random.seed(1234) # fix the seed for shuffling
 
 from PIL import Image
 from copy import deepcopy
 from torchvision import datasets, transforms
 from torch.utils.data.dataloader import default_collate
-from multiprocessing import Process, Queue, Pool
 from contextlib import contextmanager
 from joblib import Parallel, delayed
 #from loky import get_reusable_executor
@@ -23,7 +24,7 @@ try:
     pyvips.cache_set_max(0)
     USE_PYVIPS = True
     # print("using VIPS backend")
-except e:
+except:
     # print("failure to load VIPS: using PIL backend")
     USE_PYVIPS = False
 
@@ -63,6 +64,10 @@ class MultiImageFolder(datasets.ImageFolder):
                                                loader=loader)
         self.num_roots = len(roots)
         self.num_extra_roots = self.num_roots - 1
+
+        # sort the images otherwise we will always read a folder at a time
+        # this is problematic for the test-loader which generally doesnt shuffle!
+        random.shuffle(self.imgs)
 
         # determine the extension replacements
         # eg: original is .png, other is .tiff for pyramid tiff, etc, etc
@@ -131,11 +136,8 @@ class MultiImageFolderLoader(object):
                                                         target_transform,
                                                         **kwargs)
 
-        # build the loaders, note that pinning memory **deadlocks** this loader!
-        #kwargs_loader = {'num_workers': 4, 'pin_memory': True} if use_cuda else {}
-
-        kwargs_loader = {'num_workers': multiprocessing.cpu_count(),
-                         'pin_memory': True} if use_cuda else {}
+        # build the loaders
+        kwargs_loader = {'num_workers': 12, 'pin_memory': False} if use_cuda else {}
         self.train_loader = create_loader(train_dataset,
                                           train_sampler,
                                           batch_size,
@@ -147,8 +149,6 @@ class MultiImageFolderLoader(object):
                                          batch_size,
                                          shuffle=False,
                                          **kwargs_loader)
-        # self.train_loader.pool = self.pool
-        # self.test_loader.pool = self.pool
         self.batch_size = batch_size
         self.output_size = 0
 
