@@ -83,6 +83,9 @@ class CropLambda(object):
         img = self.__call_pyvips__(crop, override) if USE_PYVIPS is True \
             else self.__call_PIL__(crop, override)
 
+        # XXX: joblib tentative fix
+        gc.collect()
+
         if transform is not None:
             return F.to_tensor(transform(img))
 
@@ -146,27 +149,26 @@ class CropLambda(object):
 
         # crop the actual image and then upsample it to window_size
         crop_img = img.crop(x, y, crop_size[0], crop_size[1])
-        crop_img = img.crop(x, y, crop_size[0], crop_size[1])
         crop_img_np = np.array(crop_img.resize(self.window_size / crop_img.width,
                                                vscale=self.window_size / crop_img.height).write_to_memory())
 
-        #XXX: try to mitigate memory leak in VIPS
-        del img
-        del crop_img
-        # gc.collect()
+        # try to mitigate memory leak
+        del img; del crop_img
 
+        # return the image reshaped appropriately for pytorch
         return crop_img_np.reshape(self.window_size, self.window_size, -1)
 
 
 def pil_loader(path):
-    # open path as file to avoid ResourceWarning (https://github.com/python-pillow/Pillow/issues/835)
+    # open path as file to avoid ResourceWarning :
+    # https://github.com/python-pillow/Pillow/issues/835
     with open(path, 'rb') as f:
         with Image.open(f) as img:
             img_mode = img.mode
             if img_mode == '1':
                 return img.convert('L')
 
-            return img.convert(mode)
+            return img.convert(img_mode)
 
 
 class CropDualImageFolder(datasets.ImageFolder):
