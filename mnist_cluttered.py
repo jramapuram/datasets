@@ -84,9 +84,26 @@ class ClutteredMNISTLoader(object):
                                          batch_size,
                                          shuffle=False,
                                          **kwargs)
-
-        self.output_size = 10
+        self.output_size = 0
         self.batch_size = batch_size
+
+        # determine output size
+        if 'output_size' not in kwargs:
+            for _, label in self.train_loader:
+                if not isinstance(label, (float, int))\
+                   and len(label) > 1:
+                    for l in label:
+                        if l > self.output_size:
+                            self.output_size = l
+                else:
+                    if label > self.output_size:
+                        self.output_size = label
+
+            self.output_size = self.output_size.item() + 1 # Longtensor --> int
+        else:
+            self.output_size = kwargs['output_size']
+
+        print("determined output_size: ", self.output_size)
         self.img_shp = [1, 100, 100]
 
     @staticmethod
