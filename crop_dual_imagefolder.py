@@ -18,7 +18,7 @@ from contextlib import contextmanager
 from joblib import Parallel, delayed
 
 
-from .utils import create_loader, is_lambda
+from .utils import create_loader
 
 
 # logic for loading:
