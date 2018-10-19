@@ -162,16 +162,16 @@ class CropLambda(object):
         max_img_percentage: the maximum percentage of the image to use for the crop.
     """
 
-    def __init__(self, path, window_size, differentiable_image_size, max_img_percentage=0.15):
+    def __init__(self, path, window_size, crop_padding, max_img_percentage=0.15):
         self.path = path
         self.window_size = window_size
-        self.differentiable_image_size = differentiable_image_size
+        self.crop_padding = crop_padding
         self.max_img_percent = max_img_percentage
 
     def scale(self, val, newmin, newmax):
         return (((val) * (newmax - newmin)) / (1.0)) + newmin
 
-    def _get_crop_sizing_and_centers(self, crop, img_size, px=1):
+    def _get_crop_sizing_and_centers(self, crop, img_size, px):
         # scale the (x, y) co-ordinates to the size of the image
         assert crop[1] >= 0 and crop[1] <= 1, "x needs to be \in [0, 1]"
         assert crop[2] >= 0 and crop[2] <= 1, "y needs to be \in [0, 1]"
@@ -191,12 +191,12 @@ class CropLambda(object):
         #return x, y, crop_size
         return x, y, crop_size
 
-    def _get_scale_and_size(self, scale, img_size, px=1):
+    def _get_scale_and_size(self, scale, img_size, px):
         # calculate the scale of the true crop using the provided scale
         # Note: this is different from the return size, i.e. window_size
         crop_scale = min(scale, self.max_img_percent)
         crop_size = np.floor(img_size * crop_scale).astype(int)
-        crop_size[0] += px; crop_size[1] += px # add to create a larger box
+        crop_size[0] += 2*px; crop_size[1] += 2*px # add to create a larger box
         crop_size = [max(crop_size[0], 2), max(crop_size[1], 2)] # ensure not too small
         crop_size = [min(crop_size[0], img_size[0]), # ensure not larger than img
                      min(crop_size[1], img_size[1])]
@@ -212,117 +212,11 @@ class CropLambda(object):
 
         return vimg_np
 
-    def _inlay_image(self, crop_location, crop_img, chans):
-        ''' place the crop in a bigger image with the same relative pos/scale '''
-        img_size = [self.differentiable_image_size, self.differentiable_image_size]
-        larger_img = np.zeros(img_size + [chans],dtype=np.float32)
-        return larger_img
-
-        # grab the crop location and centers for the inlay
-        x, y, crop_size = self._get_crop_sizing_and_centers(crop_location, np.array(img_size))
-
-        # resize the crop to be the same proportions in the inlay
-        crop_resized = crop_img.resize(crop_size[0] / crop_img.width,
-                                       vscale=crop_size[1] / crop_img.height)
-        crop_resized_np = self.vimage_to_np(crop_resized)
-        del crop_resized  # try to mitigate memory leak
-
-        # write the crop into the new inlay
-        larger_img[y:y+crop_size[1], x:x+crop_size[0], :] = crop_resized_np
-
-        # return the crop and the inlay
-        return larger_img, crop_resized_np
-
-    def _crop_to_np(self, full_img, crop_location, prefix='bla'):
-        ''' helper to take an image, a crop and return np image'''
-        full_img_size = np.array([full_img.width, full_img.height])
-        x, y, crop_size = self._get_crop_sizing_and_centers(crop_location, full_img_size)
-        # print(prefix+'_crop_location = ', x, y, crop_size)
-        crop_img = full_img.crop(x, y, crop_size[0], crop_size[1])
-        crop_img = crop_img.resize(self.window_size / crop_img.width,
-                                   vscale=self.window_size / crop_img.height)
-        crop_img_np = self.vimage_to_np(crop_img)
-        del crop_img # memory cleanups
-        return crop_img_np
-
-    def _numerical_perturbations(self, crop_location, full_img, scale_eps=0.001):
-        ''' calculates x+eps, y+eps, resized(scale*1.001) and
-                       x-eps, y-eps, resized(scale*0.999)
-            and returns f(x/y/s+h) - f(x/y/s-h) / eps
-
-           Example outputs (x, y, [crop_size_x, crop_size_y]):
-               orig_crop_location =  23 735 [93, 93]
-               fx_p_h_crop_location =  24 735 [93, 93]
-               fx_m_h_crop_location =  22 735 [93, 93]
-               fy_p_h_crop_location =  23 736 [93, 93]
-               fy_m_h_crop_location =  23 734 [93, 93]
-               fs_p_h_crop_location =  23 735 [97, 97]
-               fs_m_h_crop_location =  23 735 [89, 89]
-
-               orig_crop_location =  3420 356 [196, 196]
-               fx_p_h_crop_location =  3421 356 [196, 196]
-               fx_m_h_crop_location =  3419 356 [196, 196]
-               fy_p_h_crop_location =  3420 357 [196, 196]
-               fy_m_h_crop_location =  3420 355 [196, 196]
-               fs_p_h_crop_location =  3420 356 [200, 200]
-               fs_m_h_crop_location =  3420 356 [192, 192]
-
-               orig_crop_location =  38 329 [1200, 1200]
-               fx_p_h_crop_location =  39 329 [1200, 1200]
-               fx_m_h_crop_location =  37 329 [1200, 1200]
-               fy_p_h_crop_location =  38 330 [1200, 1200]
-               fy_m_h_crop_location =  38 328 [1200, 1200]
-               fs_p_h_crop_location =  38 329 [1200, 1200]
-               fs_m_h_crop_location =  38 329 [1200, 1200]
-
-        '''
-        # calculate one pixel offsets for the x and y coords
-        full_img_size = np.array([full_img.width, full_img.height])
-        one_px_x = 1.0 / full_img_size[0]
-        one_px_y = 1.0 / full_img_size[1]
-        # TODO: do logic for 1px in scale
-        # _, _, orig_crop_size = self._get_crop_sizing_and_centers(
-        #     crop_location, full_img_size
-        # )
-        # m_one_px_s = crop_location[0] - ((orig_crop_size + 1) / full_img_size[0])
-        # p_one_px_s = crop_location[0] - ((orig_crop_size - 1) / full_img_size[1])
-
-        # debug
-        # full_img_size = np.array([full_img.width, full_img.height])
-        # orig_x, orig_y, orig_crop_size = self._get_crop_sizing_and_centers(crop_location, full_img_size)
-        #print('orig_crop_location = ', orig_x, orig_y, orig_crop_size)
-
-        # [scale, x+/-eps, y]
-        loc_fx_p_h = [crop_location[0], crop_location[1] + one_px_x, crop_location[2]]
-        img_fx_p_h = self._crop_to_np(full_img, np.array(loc_fx_p_h).clip(0.0, 1.0), 'fx_p_h')
-        loc_fx_m_h = [crop_location[0], crop_location[1] - one_px_x, crop_location[2]]
-        img_fx_m_h = self._crop_to_np(full_img, np.array(loc_fx_m_h).clip(0.0, 1.0), 'fx_m_h')
-        img_x_h = np.expand_dims((img_fx_p_h - img_fx_m_h) / 2.0, 0)
-
-        # [scale, x, y+/-eps]
-        loc_fy_p_h = [crop_location[0], crop_location[1], crop_location[2] + one_px_y]
-        img_fy_p_h = self._crop_to_np(full_img, np.array(loc_fy_p_h).clip(0.0, 1.0), 'fy_p_h')
-        loc_fy_m_h = [crop_location[0], crop_location[1], crop_location[2] - one_px_y]
-        img_fy_m_h = self._crop_to_np(full_img, np.array(loc_fy_m_h).clip(0.0, 1.0), 'fy_m_h')
-        img_y_h = np.expand_dims((img_fy_p_h - img_fy_m_h) / 2.0, 0)
-
-        # [scale+/-eps, x, y+eps]
-        loc_fs_p_h = [crop_location[0] + scale_eps, crop_location[1], crop_location[2]]
-        # loc_fs_p_h = [p_one_px_s, crop_location[1], crop_location[2]]
-        img_fs_p_h = self._crop_to_np(full_img, np.array(loc_fs_p_h).clip(0.0, 1.0), 'fs_p_h')
-        loc_fs_m_h = [crop_location[0] - scale_eps, crop_location[1], crop_location[2]]
-        # loc_fs_m_h = [m_one_px_s, crop_location[1], crop_location[2]]
-        img_fs_m_h = self._crop_to_np(full_img, np.array(loc_fs_m_h).clip(0.0, 1.0), 'fs_m_h')
-        img_s_h = np.expand_dims((img_fs_p_h - img_fs_m_h) / scale_eps, 0)
-
-        # stack it up and return
-        return np.concatenate((img_s_h, img_x_h, img_y_h), axis=0)
-
-    def __call__(self, crop_location, override=False, px=1):
+    def __call__(self, crop_location, override=False):
         ''' converts [crop_center, x, y] to a 4-tuple
             defining the left, upper, right, and lower
             pixel coordinate and returns a crop expanded
-            by px on all directions.
+            by crop_padding on all directions.
 
         Example crop sizes:
             crops =  28 3797 [203, 203]
@@ -347,12 +241,14 @@ class CropLambda(object):
 
         # get the crop dims
         self.max_img_percent = 1.0 if override is True else self.max_img_percent
-        x, y, crop_size = self._get_crop_sizing_and_centers(crop_location, img_size, px=px)
+        x, y, crop_size = self._get_crop_sizing_and_centers(crop_location,
+                                                            img_size,
+                                                            self.crop_padding)
 
         # crop the actual image and then upsample it to window_size
         crop_img = img.crop(x, y, crop_size[0], crop_size[1])
-        crop_img = crop_img.resize((self.window_size + px + 1) / crop_img.width,
-                                   vscale=(self.window_size + px + 1) / crop_img.height)
+        crop_img = crop_img.resize((self.window_size + (2*self.crop_padding)) / crop_img.width,
+                                   vscale=(self.window_size + (2*self.crop_padding)) / crop_img.height)
         crop_img_np = self.vimage_to_np(crop_img)
 
         # try to mitigate memory leak
@@ -360,25 +256,6 @@ class CropLambda(object):
         # gc.collect() # XXX: too slow
 
         return F.to_tensor(crop_img_np).unsqueeze(0)
-
-        # get the inlay, the second param (crop-upsampled) is ignored
-        # inlay_img_np, _ = self._inlay_image(crop_location, crop_img, chans)
-
-        # # resize the true crop to the expected window_size
-        # crop_img = crop_img.resize(self.window_size / crop_img.width,
-        #                            vscale=self.window_size / crop_img.height)
-        # crop_img_np = self.vimage_to_np(crop_img)
-
-        # # grab the numerical perturbations
-        # crop_perturbations_np = self._numerical_perturbations(crop_location, img)
-
-        # # try to mitigate memory leak
-        # del img; del crop_img
-        # # gc.collect() # XXX: too slow
-
-        # return [F.to_tensor(crop_img_np).unsqueeze(0),
-        #         F.to_tensor(inlay_img_np).unsqueeze(0),
-        #         torch.from_numpy(crop_perturbations_np).unsqueeze(0).transpose(2, 4)]
 
 
 def pil_loader(path):
@@ -398,7 +275,7 @@ class CropDualImageFolder(datasets.ImageFolder):
     def __init__(self, root, transform=None, target_transform=None, **kwargs):
         assert 'window_size' in kwargs, "crop dual dataset needs a window_size"
         assert 'max_img_percent' in kwargs, "crop dual dataset needs a max_img_percent"
-        assert 'differentiable_image_size' in kwargs, "crop dual dataset needs differentiable_image_size"
+        assert 'crop_padding' in kwargs, "crop dual dataset needs crop_padding"
         assert 'postfix' in kwargs, "crop dual dataset needs a postfix for second dataset"
         super(CropDualImageFolder, self).__init__(root,
                                                   transform=transform,
@@ -407,7 +284,7 @@ class CropDualImageFolder(datasets.ImageFolder):
         self.postfix = kwargs['postfix']
         self.window_size = kwargs['window_size']
         self.max_img_percent = kwargs['max_img_percent']
-        self.differentiable_image_size = kwargs['differentiable_image_size']
+        self.crop_padding = kwargs['crop_padding']
 
         # sort the images otherwise we will always read a folder at a time
         # this is problematic for the test-loader which generally doesnt shuffle!
@@ -451,7 +328,7 @@ class CropDualImageFolder(datasets.ImageFolder):
         path, _ = self.imgs_lbda[index]
         if USE_LIB != 'rust': # we return the crop object
             crop_lbda = CropLambda(path, window_size=self.window_size,
-                                   differentiable_image_size=self.differentiable_image_size,
+                                   crop_padding=self.crop_padding,
                                    max_img_percentage=self.max_img_percent)
         else: # rust lib just needs a list of the paths
             crop_lbda = path
@@ -469,7 +346,7 @@ class CropDualImageFolderLoader(object):
                                                         **kwargs)
 
         # build the loaders, note that pinning memory **deadlocks** this loader!
-        kwargs_loader = {'num_workers': 4, 'pin_memory': False, 'collate_fn': collate} \
+        kwargs_loader = {'num_workers': 4, 'pin_memory': True, 'collate_fn': collate} \
             if use_cuda else {'collate_fn': collate}
         self.train_loader = create_loader(train_dataset,
                                           train_sampler,
