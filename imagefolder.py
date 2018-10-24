@@ -35,20 +35,21 @@ class ImageFolderLoader(object):
         print("determined img_size: ", self.img_shp)
         if 'output_size' not in kwargs:
             for _, label in self.train_loader:
-                if not isinstance(label, (float, int))\
-                   and len(label) > 1:
-                    for l in label:
-                        if l > self.output_size:
-                            self.output_size = l
+                if not isinstance(label, (float, int)) and len(label) > 1:
+                    l = np.array(label).max()
+                    if l > self.output_size:
+                        self.output_size = l
                 else:
-                    if label > self.output_size:
-                        self.output_size = label
+                    l = label.max().item()
+                    if l > self.output_size:
+                        self.output_size = l
 
-            self.output_size = self.output_size.item() + 1 # Longtensor --> int
+            self.output_size = self.output_size + 1
         else:
             self.output_size = kwargs['output_size']
 
         print("determined output_size: ", self.output_size)
+        assert self.output_size > 0
 
     @staticmethod
     def get_datasets(path, transform=None, target_transform=None):

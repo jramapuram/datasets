@@ -1,4 +1,5 @@
 import os
+import warnings
 import gc
 import torch
 import numpy as np
@@ -7,6 +8,7 @@ import torchvision.transforms.functional as F
 import random
 random.seed(1234) # fix the seed for shuffling
 
+from tqdm import tqdm
 from PIL import Image
 from copy import deepcopy
 from torchvision import datasets, transforms
@@ -29,13 +31,6 @@ except:
     USE_PYVIPS = False
 
 
-def collate(batch):
-    r"""Puts each data field into a tensor with outer dimension batch size"""
-    batch_standard = [(data, lbl) for data, _, lbl in batch]
-    lbdas = [lbda for _, lbda, _ in batch]
-    return lbdas, default_collate(batch_standard)
-
-
 def pil_loader(path):
     # open path as file to avoid ResourceWarning (https://github.com/python-pillow/Pillow/issues/835)
     with open(path, 'rb') as f:
@@ -48,9 +43,11 @@ def pil_loader(path):
 
 
 def vips_loader(path):
-    img = pyvips.Image.new_from_file(path, access='sequential-unbuffered')
+    img = pyvips.Image.new_from_file(path, access='sequential')
     height, width = img.height, img.width
-    return np.array(img.write_to_memory()).reshape(height, width, -1)
+    img_np = np.array(img.write_to_memory()).reshape(height, width, -1)
+    del img # mitigate tentative memory leak in pyvips
+    return img_np
 
 
 class MultiImageFolder(datasets.ImageFolder):
@@ -131,13 +128,14 @@ class MultiImageFolderLoader(object):
     def __init__(self, path, batch_size, train_sampler=None, test_sampler=None,
                  transform=None, target_transform=None, use_cuda=1, **kwargs):
         ''' assumes that the '''
+        warnings.warn("multi-imagefolder uses all CPU cores which aids feeding")
         # first get the datasets
         train_dataset, test_dataset = self.get_datasets(path, transform,
                                                         target_transform,
                                                         **kwargs)
 
         # build the loaders
-        kwargs_loader = {'num_workers': 12, 'pin_memory': False} if use_cuda else {}
+        kwargs_loader = {'num_workers': os.cpu_count(), 'pin_memory': False} if use_cuda else {}
         self.train_loader = create_loader(train_dataset,
                                           train_sampler,
                                           batch_size,
@@ -156,25 +154,33 @@ class MultiImageFolderLoader(object):
         test_imgs, _ = self.train_loader.__iter__().__next__()
         self.img_shp = list(test_imgs[0].size()[1:])
         print("determined img_size: ", self.img_shp)
+        self.aux_imgs_shp = [list(ti.size()[1:]) for ti in test_imgs[1:]]
+        print("determined aux img_sizes: ", self.aux_imgs_shp)
 
         # iterate over the entire dataset to find the max label
-        # if 'output_size' not in kwargs:
-        #     for _, label in self.train_loader:
-        #         if not isinstance(label, (float, int))\
-        #            and len(label) > 1:
-        #             for l in label:
-        #                 if l > self.output_size:
-        #                     self.output_size = l
-        #         else:
-        #             if label > self.output_size:
-        #                 self.output_size = label
+        if 'output_size' not in kwargs:
+            warning_str = "trying to determine output_size..."  \
+                          "consider passing this in kwargs to make " \
+                          "this quicker for large imgs."\
+                          .replace("\n", "").replace("\t", "")
+            warnings.warn(warning_str)
 
-        #     self.output_size = self.output_size.item() + 1 # Longtensor --> int
-        # else:
-        #     self.output_size = kwargs['output_size']
-        self.output_size = 10
+            for _, label in tqdm(self.train_loader):
+                if not isinstance(label, (float, int)) and len(label) > 1:
+                    l = np.array(label).max()
+                    if l > self.output_size:
+                        self.output_size = l
+                else:
+                    l = label.max().item()
+                    if l > self.output_size:
+                        self.output_size = l
+
+            self.output_size = self.output_size + 1
+        else:
+            self.output_size = kwargs['output_size']
 
         print("determined output_size: ", self.output_size)
+        assert self.output_size > 0
 
     @staticmethod
     def get_datasets(path, transform=None, target_transform=None, **kwargs):
