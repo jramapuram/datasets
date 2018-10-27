@@ -4,19 +4,19 @@ import numpy as np
 import torchvision.transforms as transforms
 from copy import deepcopy
 
-from .crop_dual_imagefolder import CropDualImageFolderLoader
-from .all_pairs.grid_loader import GridDataLoader
-from .class_sampler import ClassSampler
-from .cifar import CIFAR10Loader
-from .fashion_mnist import FashionMNISTLoader
-from .mnist_cluttered import ClutteredMNISTLoader
-from .mnist import MNISTLoader
-from .omniglot import OmniglotLoader
-from .permuted_mnist import PermutedMNISTLoader
-from .svhn import SVHNCenteredLoader, SVHNFullLoader
-from .imagefolder import ImageFolderLoader
-from .multi_imagefolder import MultiImageFolderLoader
-from .utils import bw_2_rgb_lambda, resize_lambda, \
+from datasets.crop_dual_imagefolder import CropDualImageFolderLoader
+from datasets.all_pairs.grid_loader import GridDataLoader
+from datasets.class_sampler import ClassSampler
+from datasets.cifar import CIFAR10Loader
+from datasets.fashion_mnist import FashionMNISTLoader
+from datasets.mnist_cluttered import ClutteredMNISTLoader
+from datasets.mnist import MNISTLoader
+from datasets.omniglot import OmniglotLoader
+from datasets.permuted_mnist import PermutedMNISTLoader
+from datasets.svhn import SVHNCenteredLoader, SVHNFullLoader
+from datasets.imagefolder import ImageFolderLoader
+from datasets.multi_imagefolder import MultiImageFolderLoader
+from datasets.utils import bw_2_rgb_lambda, resize_lambda, \
     simple_merger, sequential_test_set_merger
 
 # ensures we get the same permutation
@@ -108,7 +108,8 @@ def get_loader(args, transform=None, target_transform=None,
             ]
             if transform is not None and isinstance(transform, list):
                 transform_list = transform + transform_list
-
+            
+            #  Shouldn't this be transform_list
             loader.append(get_loader(args_clone, transform=transform, **kwargs))
             if increment_seed:
                 PERMUTE_SEED += 1
@@ -117,6 +118,26 @@ def get_loader(args, transform=None, target_transform=None,
         if sequentially_merge_test:
             loader = sequential_test_set_merger(loader)
             #loader = simple_merger(loader, args.batch_size, args.cuda)
+
+    elif 'HRes' in task:
+        args_clone = deepcopy(args)
+        task = task.split('_')[1]
+        transform_list = [
+                transforms.Resize((512, 512)) # XXX: parameterize
+                # transforms.Normalize((0.1307,), (0.3081,))
+            ]
+        if transform is not None and isinstance(transform, list):
+            transform_list = transform + transform_list
+
+        return loader_map[task](path=data_dir,
+                        batch_size=args.batch_size,
+                        transform=transform_list,
+                        target_transform=target_transform,
+                        train_sampler=train_sampler,
+                        test_sampler=test_sampler,
+                        use_cuda=args.cuda,
+                        **kwargs)
+
     elif 'rotated' in task:
         task = task.split('_')[1]
         loader = get_rotated_loader(task, args)

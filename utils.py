@@ -76,6 +76,11 @@ def normalize_images(imgs, mu=None, sigma=None, eps=1e-9):
 
     return (imgs - mu) / (sigma + eps), [mu, sigma]
 
+# Nasty hack as parameters can't be passed from main at this point
+def normalize_images_fixed(imgs, mu=None, sigma=None, eps=1e-9):
+    mu, sigma = 0.1307, 0.3081
+    return (imgs - mu) / (sigma + eps), [mu, sigma]
+
 
 def normalize_train_test_images(train_imgs, test_imgs, eps=1e-9):
     ''' simple helper to take train and test images
