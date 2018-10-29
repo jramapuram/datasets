@@ -24,7 +24,7 @@ def load_cluttered_mnist(path, segment='train'):
 
 
 class ClutteredMNISTDataset(torch.utils.data.Dataset):
-    def __init__(self, path, segment='train', transform=None, target_transform=None):
+    def __init__(self, path, segment='train', transform=None, target_transform=None, **kwargs):
 
         self.path = os.path.expanduser(path)
         self.transform = transform

@@ -183,7 +183,8 @@ def get_split_data_loaders(args, num_classes, transform=None,
                               train_sampler=tr,
                               test_sampler=te,
                               sequentially_merge_test=False,
-                              increment_seed=False, **kwargs)
+                              increment_seed=False, 
+                              **kwargs)
                    for tr, te in zip(train_samplers, test_samplers)]
 
     if _check_for_sublist(loaders):
