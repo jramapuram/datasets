@@ -89,6 +89,7 @@ class ClutteredMNISTLoader(object):
 
         # determine output size
         if 'output_size' not in kwargs or kwargs['output_size'] is None:
+            print('Error: output size undefined\n')
             for _, label in self.train_loader:
                 if not isinstance(label, (float, int)) and len(label) > 1:
                     l = np.array(label).max()
