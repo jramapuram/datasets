@@ -41,10 +41,6 @@ loader_map = {
 def get_samplers(num_classes):
     ''' builds samplers taking into account previous classes'''
     # NOTE: test datasets are now merged via sequential_test_set_merger
-    # test_samplers = [lambda x, j=j: ClassSampler(x, class_number=j)
-    #                  for j in range(num_classes)]
-    # train_samplers = [lambda x, j=j: ClassSampler(x, class_number=j)
-    #                   for j in range(num_classes)]
     test_samplers = [ClassSampler(class_number=j, shuffle=False) for j in range(num_classes)]
     train_samplers = [ClassSampler(class_number=j, shuffle=True) for j in range(num_classes)]
     return train_samplers, test_samplers
@@ -108,9 +104,8 @@ def get_loader(args, transform=None, target_transform=None,
             ]
             if transform is not None and isinstance(transform, list):
                 transform_list = transform + transform_list
-            
-            #  Shouldn't this be transform_list
-            loader.append(get_loader(args_clone, transform=transform, **kwargs))
+
+            loader.append(get_loader(args_clone, transform=transform_list, **kwargs))
             if increment_seed:
                 PERMUTE_SEED += 1
 
@@ -118,26 +113,6 @@ def get_loader(args, transform=None, target_transform=None,
         if sequentially_merge_test:
             loader = sequential_test_set_merger(loader)
             #loader = simple_merger(loader, args.batch_size, args.cuda)
-
-    elif 'HRes' in task:
-        args_clone = deepcopy(args)
-        task = task.split('_')[1]
-        transform_list = [
-                transforms.Resize((512, 512)) # XXX: parameterize
-                # transforms.Normalize((0.1307,), (0.3081,))
-            ]
-        if transform is not None and isinstance(transform, list):
-            transform_list = transform + transform_list
-
-        return loader_map[task](path=data_dir,
-                        batch_size=args.batch_size,
-                        transform=transform_list,
-                        target_transform=target_transform,
-                        train_sampler=train_sampler,
-                        test_sampler=test_sampler,
-                        use_cuda=args.cuda,
-                        **kwargs)
-
     elif 'rotated' in task:
         task = task.split('_')[1]
         loader = get_rotated_loader(task, args)
@@ -155,7 +130,6 @@ def get_loader(args, transform=None, target_transform=None,
             kwargs['output_size'] = args.output_size
 
         return loader_map[task](path=data_dir,
-                                #batch_size=args.batch_size,
                                 transform=transform,
                                 target_transform=target_transform,
                                 train_sampler=train_sampler,
