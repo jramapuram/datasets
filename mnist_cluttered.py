@@ -107,7 +107,7 @@ class ClutteredMNISTLoader(object):
         self.img_shp = [1, 100, 100]
 
     @staticmethod
-    def get_datasets(path, transform=None, target_transform=None):
+    def get_datasets(path, transform=None, target_transform=None, **kwargs):
         if transform:
             assert isinstance(transform, list)
 
@@ -118,8 +118,8 @@ class ClutteredMNISTLoader(object):
         transform_list.append(transforms.ToTensor())
         train_dataset = ClutteredMNISTDataset(path, segment='train',
                                               transform=transforms.Compose(transform_list),
-                                              target_transform=target_transform)
+                                              target_transform=target_transform, **kwargs)
         test_dataset = ClutteredMNISTDataset(path, segment='test',
                                              transform=transforms.Compose(transform_list),
-                                             target_transform=target_transform)
+                                             target_transform=target_transform, **kwargs)
         return train_dataset, test_dataset
