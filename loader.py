@@ -83,6 +83,7 @@ def get_loader(args, transform=None, target_transform=None,
     task = args.task
     global PERMUTE_SEED
 
+
     # overwrite data dir for fashion MNIST because it has issues being
     # in the same directory as regular MNIST
     if task == 'fashion':

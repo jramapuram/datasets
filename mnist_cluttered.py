@@ -64,7 +64,7 @@ class ClutteredMNISTLoader(object):
                  transform=None, target_transform=None, use_cuda=1, **kwargs):
         # first get the datasets
         train_dataset, test_dataset = self.get_datasets(path, transform,
-                                                        target_transform)
+                                                        target_transform, **kwargs)
 
         # normalize the images
         # train_dataset.imgs, test_dataset.imgs = normalize_train_test_images(
@@ -89,7 +89,6 @@ class ClutteredMNISTLoader(object):
 
         # determine output size
         if 'output_size' not in kwargs or kwargs['output_size'] is None:
-            print('Error: output size undefined\n')
             for _, label in self.train_loader:
                 if not isinstance(label, (float, int)) and len(label) > 1:
                     l = np.array(label).max()
