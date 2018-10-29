@@ -368,7 +368,7 @@ class CropDualImageFolderLoader(object):
         print("determined img_size: ", self.img_shp)
 
         # iterate over the entire dataset to find the max label
-        if 'output_size' not in kwargs:
+        if 'output_size' not in kwargs or kwargs['output_size'] is None:
             for _, (_, label) in self.train_loader:
                 if not isinstance(label, (float, int)) and len(label) > 1:
                     l = np.array(label).max()

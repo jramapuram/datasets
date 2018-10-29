@@ -88,7 +88,7 @@ class ClutteredMNISTLoader(object):
         self.batch_size = batch_size
 
         # determine output size
-        if 'output_size' not in kwargs:
+        if 'output_size' not in kwargs or kwargs['output_size'] is None:
             for _, label in self.train_loader:
                 if not isinstance(label, (float, int)) and len(label) > 1:
                     l = np.array(label).max()

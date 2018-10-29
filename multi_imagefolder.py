@@ -61,6 +61,7 @@ class MultiImageFolder(datasets.ImageFolder):
                                                loader=loader)
         self.num_roots = len(roots)
         self.num_extra_roots = self.num_roots - 1
+        self.aux_transform = None if 'aux_transform' not in kwargs else kwargs['aux_transform']
 
         # sort the images otherwise we will always read a folder at a time
         # this is problematic for the test-loader which generally doesnt shuffle!
@@ -101,8 +102,8 @@ class MultiImageFolder(datasets.ImageFolder):
         # print("paths = ", [p0] + others)
 
         sample = self.loader(path)
-        if self.transform is not None:
-            sample = self.transform(sample)
+        if self.aux_transform is not None:
+            sample = self.aux_transform(sample)
 
         return sample
 
@@ -158,7 +159,7 @@ class MultiImageFolderLoader(object):
         print("determined aux img_sizes: ", self.aux_imgs_shp)
 
         # iterate over the entire dataset to find the max label
-        if 'output_size' not in kwargs:
+        if 'output_size' not in kwargs or kwargs['output_size'] is None:
             warning_str = "trying to determine output_size..."  \
                           "consider passing this in kwargs to make " \
                           "this quicker for large imgs."\

@@ -134,7 +134,7 @@ def get_loader(args, transform=None, target_transform=None,
             kwargs['output_size'] = args.output_size
 
         return loader_map[task](path=data_dir,
-                                batch_size=args.batch_size,
+                                #batch_size=args.batch_size,
                                 transform=transform,
                                 target_transform=target_transform,
                                 train_sampler=train_sampler,
