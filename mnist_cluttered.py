@@ -72,7 +72,7 @@ class ClutteredMNISTLoader(object):
         # )
 
         # build the loaders
-        kwargs = {'num_workers': 4, 'pin_memory': True} if use_cuda else {}
+        kwargs = {'num_workers': os.cpu_count(), 'pin_memory': True} if use_cuda else {}
         self.train_loader = create_loader(train_dataset,
                                           train_sampler,
                                           batch_size,
