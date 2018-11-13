@@ -4,7 +4,6 @@ import torch
 import warnings
 import numpy as np
 import torchvision.transforms.functional as F
-import matplotlib.pyplot as plt
 
 import random
 random.seed(1234) # fix the seed for shuffling

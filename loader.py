@@ -8,6 +8,8 @@ from datasets.crop_dual_imagefolder import CropDualImageFolderLoader
 from datasets.all_pairs.grid_loader import GridDataLoader
 from datasets.class_sampler import ClassSampler
 from datasets.cifar import CIFAR10Loader
+from datasets.nih_chest_xray import NIHChestXrayLoader
+from datasets.starcraft_predict_battle import StarcraftPredictBattleLoader
 from datasets.fashion_mnist import FashionMNISTLoader
 from datasets.mnist_cluttered import ClutteredMNISTLoader
 from datasets.mnist import MNISTLoader
@@ -24,6 +26,8 @@ PERMUTE_SEED = 1
 
 loader_map = {
     'all_pairs': GridDataLoader,
+    'nih_chest_xray': NIHChestXrayLoader,
+    'starcraft_predict_battle': StarcraftPredictBattleLoader,
     'crop_dual_imagefolder': CropDualImageFolderLoader,
     'mnist': MNISTLoader,
     'omniglot': OmniglotLoader,

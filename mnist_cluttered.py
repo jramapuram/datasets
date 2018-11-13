@@ -24,7 +24,7 @@ def load_cluttered_mnist(path, segment='train'):
 
 
 class ClutteredMNISTDataset(torch.utils.data.Dataset):
-    def __init__(self, path, segment='train', transform=None, target_transform=None):
+    def __init__(self, path, segment='train', transform=None, target_transform=None, **kwargs):
 
         self.path = os.path.expanduser(path)
         self.transform = transform
@@ -64,7 +64,8 @@ class ClutteredMNISTLoader(object):
                  transform=None, target_transform=None, use_cuda=1, **kwargs):
         # first get the datasets
         train_dataset, test_dataset = self.get_datasets(path, transform,
-                                                        target_transform)
+                                                        target_transform,
+                                                        **kwargs)
 
         # normalize the images
         # train_dataset.imgs, test_dataset.imgs = normalize_train_test_images(
@@ -72,7 +73,7 @@ class ClutteredMNISTLoader(object):
         # )
 
         # build the loaders
-        kwargs = {'num_workers': 4, 'pin_memory': True} if use_cuda else {}
+        kwargs = {'num_workers': 8, 'pin_memory': True} if use_cuda else {}
         self.train_loader = create_loader(train_dataset,
                                           train_sampler,
                                           batch_size,
@@ -107,7 +108,7 @@ class ClutteredMNISTLoader(object):
         self.img_shp = [1, 100, 100]
 
     @staticmethod
-    def get_datasets(path, transform=None, target_transform=None):
+    def get_datasets(path, transform=None, target_transform=None, **kwargs):
         if transform:
             assert isinstance(transform, list)
 
@@ -115,11 +116,14 @@ class ClutteredMNISTLoader(object):
         if transform:
             transform_list.extend(transform)
 
-        transform_list.append(transforms.ToTensor())
+        transform_names = [str(tt) for tt in transform_list]
+        if 'ToTensor()' not in transform_names:
+            transform_list.append(transforms.ToTensor())
+
         train_dataset = ClutteredMNISTDataset(path, segment='train',
                                               transform=transforms.Compose(transform_list),
-                                              target_transform=target_transform)
+                                              target_transform=target_transform, **kwargs)
         test_dataset = ClutteredMNISTDataset(path, segment='test',
                                              transform=transforms.Compose(transform_list),
-                                             target_transform=target_transform)
+                                             target_transform=target_transform, **kwargs)
         return train_dataset, test_dataset
