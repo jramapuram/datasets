@@ -273,7 +273,7 @@ class CropDualImageFolder(datasets.ImageFolder):
     """Inherits from Imagefolder and returns a lambda instead of an image"""
     def __init__(self, root, transform=None, target_transform=None, **kwargs):
         assert 'window_size' in kwargs, "crop dual dataset needs a window_size"
-        assert 'max_img_percent' in kwargs, "crop dual dataset needs a max_img_percent"
+        assert 'max_image_percentage' in kwargs, "crop dual dataset needs a max_image_percentage"
         assert 'crop_padding' in kwargs, "crop dual dataset needs crop_padding"
         assert 'postfix' in kwargs, "crop dual dataset needs a postfix for second dataset"
         super(CropDualImageFolder, self).__init__(root,
@@ -282,7 +282,7 @@ class CropDualImageFolder(datasets.ImageFolder):
                                                   loader=pil_loader)
         self.postfix = kwargs['postfix']
         self.window_size = kwargs['window_size']
-        self.max_img_percent = kwargs['max_img_percent']
+        self.max_img_percent = kwargs['max_image_percentage']
         self.crop_padding = kwargs['crop_padding']
 
         # sort the images otherwise we will always read a folder at a time
