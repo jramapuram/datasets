@@ -13,6 +13,34 @@ from torchvision import datasets, transforms
 from .abstract_dataset import AbstractLoader
 from .utils import create_loader
 
+try:
+    import pyvips
+    # pyvips.leak_set(True)
+    # pyvips.cache_set_max_mem(10000)
+    pyvips.cache_set_max(0)
+    USE_PYVIPS = True
+    # print("using VIPS backend")
+except:
+    # print("failure to load VIPS: using PIL backend")
+    USE_PYVIPS = False
+
+def vips_loader(path):
+    img = pyvips.Image.new_from_file(path, access='sequential')
+    height, width = img.height, img.width
+    img_np = np.array(img.write_to_memory()).reshape(height, width, -1)
+    del img # mitigate tentative memory leak in pyvips
+    return img_np
+
+
+def pil_loader(path):
+    # open path as file to avoid ResourceWarning :
+    # https://github.com/python-pillow/Pillow/issues/835
+    with open(path, 'rb') as f:
+        with Image.open(f) as img:
+            # return img.convert('L')
+            return img.convert('RGB')
+
+
 def to_binary(arr):
     return arr.dot(2**np.arange(arr.shape[-1])[::-1])
 
@@ -46,21 +74,24 @@ def read_classes(csv_name='predictions.csv'):
     # classes = one_hot(classes)
     classes = parsed['marine_count'].values.astype(np.int64)
 
+    # # filter out the 0 marine elements since it is heavy tailed
+    # idx = classes > 0
+    # classes = classes[idx]
+
+    # remove the large classes which shouldn't be there
+    idx2 = classes < 23
+    classes = classes[idx2]
+
     filenames = {
-        'relative_path': parsed['relative_img'].values,
-        'fullscreen_path': parsed['fullscreen_img'].values,
-        'minimap_path': parsed['minimap_img'].values
+        'relative_path': parsed['relative_img'].values[idx2],
+        'fullscreen_path': parsed['fullscreen_img'].values[idx2],
+        'minimap_path': parsed['minimap_img'].values[idx2]
+        # 'relative_path': parsed['relative_img'].values[idx][idx2],
+        # 'fullscreen_path': parsed['fullscreen_img'].values[idx][idx2],
+        # 'minimap_path': parsed['minimap_img'].values[idx][idx2]
     }
+
     return classes, filenames
-
-
-def pil_loader(path):
-    # open path as file to avoid ResourceWarning :
-    # https://github.com/python-pillow/Pillow/issues/835
-    with open(path, 'rb') as f:
-        with Image.open(f) as img:
-            # return img.convert('L')
-            return img.convert('RGB')
 
 
 class StarcraftPredictBattleDataset(torch.utils.data.Dataset):
@@ -69,11 +100,13 @@ class StarcraftPredictBattleDataset(torch.utils.data.Dataset):
         self.split = split
         self.path = os.path.expanduser(path)
         self.transform = transform
+        #self.loader = vips_loader if USE_PYVIPS is True else pil_loader
+        self.loader = pil_loader
         self.target_transform = target_transform
 
         # hard-coded
         # self.output_size = 124
-        self.output_size = 74
+        self.output_size = 22 + 1 # 22 marines + 0 case
 
         # load the images-paths and labels
         self.labels, self.img_names = read_classes(os.path.join(self.path, "predictions.csv"))
@@ -105,8 +138,8 @@ class StarcraftPredictBattleDataset(torch.utils.data.Dataset):
 
     def __getitem__(self, index):
         target = self.labels[index]
-        fullscreen = pil_loader(os.path.join(self.path, self.img_names['fullscreen_path'][index]))
-        minimap = pil_loader(os.path.join(self.path, self.img_names['minimap_path'][index]))
+        fullscreen = self.loader(os.path.join(self.path, self.img_names['fullscreen_path'][index]))
+        minimap = self.loader(os.path.join(self.path, self.img_names['minimap_path'][index]))
 
         if self.transform is not None:
             minimap = self.transform(minimap)
@@ -126,9 +159,43 @@ class StarcraftPredictBattleDataset(torch.utils.data.Dataset):
         return len(self.labels)
 
 
+def compute_sampler_weighting(path):
+    ''' reads the classes, computes the weights and then does :
+             1.0 - #samples / #total_samples                '''
+    classes, _ = read_classes(os.path.join(path, "predictions.csv"))
+    hist, _ = np.histogram(classes, classes.max()+1)
+    num_samples = len(classes)
+    # weights_unbalanced = [hist[i] for i in classes]
+    # weights = [1.0 - (w / num_samples) for w in weights_unbalanced]
+    weights = [hist[i] for i in classes]
+
+    # compute train - test weighting
+    num_test = int(num_samples * 0.2)
+    num_train = num_samples - num_test
+    weights_train = weights[0:num_train]
+    weights_test = weights[-num_test:]
+
+    # don't need this anymore
+    del classes #XXX
+
+    # return reciprocal weights
+    return [1.0 / np.array(weights_train),
+            1.0 / np.array(weights_test)]
+
+
 class StarcraftPredictBattleLoader(AbstractLoader):
     def __init__(self, path, batch_size, train_sampler=None, test_sampler=None,
                  transform=None, target_transform=None, use_cuda=1, **kwargs):
+        # derive the weighted samplers
+        assert train_sampler is None, "sc2 loader uses weighted sampler"
+        assert test_sampler is None, "sc2 loader uses weighted sampler"
+        weights_train, weights_test = compute_sampler_weighting(path)
+        train_sampler = torch.utils.data.sampler.WeightedRandomSampler(weights=weights_train,
+                                                                       num_samples=len(weights_train))
+        test_sampler = torch.utils.data.sampler.WeightedRandomSampler(weights=weights_test,
+                                                                      num_samples=len(weights_test))
+
+        # use the abstract class to build the loader
         super(StarcraftPredictBattleLoader, self).__init__(StarcraftPredictBattleDataset, path=path,
                                                            batch_size=batch_size,
                                                            train_sampler=train_sampler,
@@ -136,8 +203,11 @@ class StarcraftPredictBattleLoader(AbstractLoader):
                                                            transform=transform,
                                                            target_transform=target_transform,
                                                            use_cuda=use_cuda, **kwargs)
-        self.output_size = 124  # fixed
-        self.loss_type = 'bce' # fixed
+        # self.output_size = 124  # fixed
+        # self.loss_type = 'bce' # fixed
+        self.output_size = 22 + 1 # fixed
+        self.loss_type = 'sce' # fixed
+        print("derived output size = ", self.output_size)
 
         # grab a test sample to get the size
         [test_minimap, _], _ = self.train_loader.__iter__().__next__()

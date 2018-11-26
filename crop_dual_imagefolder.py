@@ -140,14 +140,20 @@ class CropLambdaPool(object):
     def _handle_warnings(self):
         print("using {} image cropping-backend".format(USE_LIB))
 
-    def _apply(self, lbda, z_i, override):
-        return lbda(z_i, override=override)
+    def _apply(self, lbda, top_left_i, bottom_right_i, override):
+        return lbda(top_left_i, bottom_right_i, override=override)
 
-    def __call__(self, list_of_lambdas_or_strs, z_vec, override=False):
-        z_vec = z_vec.astype(np.float32)
+    def __call__(self, list_of_lambdas_or_strs,
+                 top_left_vec, bottom_right_vec,
+                 override=False):
+        # convert to fp32 first
+        top_left_vec = top_left_vec.astype(np.float32)
+        bottom_right_vec = bottom_right_vec.astype(np.float32)
+
         if USE_LIB != "rust":
             return Parallel(n_jobs=self.num_workers, timeout=300)( # n_jobs=1 disables parallelization
-                delayed(self._apply)(list_of_lambdas_or_strs[i], np.ascontiguousarray(z_vec[i]), override=override)
+                delayed(self._apply)(list_of_lambdas_or_strs[i], np.ascontiguousarray(top_left_vec[i]),
+                                     np.ascontiguousarray(bottom_right_vec[i]), override=override)
                 for i in range(len(list_of_lambdas_or_strs)))
 
         return self.rust_ffi(list_of_lambdas_or_strs, z_vec, override=override)
@@ -167,39 +173,27 @@ class CropLambda(object):
         self.crop_padding = crop_padding
         self.max_img_percent = max_img_percentage
 
-    def scale(self, val, newmin, newmax):
-        return (((val) * (newmax - newmin)) / (1.0)) + newmin
+    def scale(self, val, newmin, newmax, oldmin, oldmax):
+        return (((val - oldmin) * (newmax - newmin)) / (oldmax - oldmin)) + newmin
 
-    def _get_crop_sizing_and_centers(self, crop, img_size, px):
+    def _get_crop_sizing_and_centers(self, top_left, bottom_right, img_size):
         # scale the (x, y) co-ordinates to the size of the image
-        assert crop[1] >= 0 and crop[1] <= 1, "x needs to be \in [0, 1]"
-        assert crop[2] >= 0 and crop[2] <= 1, "y needs to be \in [0, 1]"
-        assert crop[0] >= 0 and crop[0] <= 1, "scale needs to be \in [0, 1]"
-        x, y = [int(self.scale(crop[1], 0, img_size[0])),
-                int(self.scale(crop[2], 0, img_size[1]))]
+        assert top_left[0] >= -1 and top_left[1] <= 1, "top_left needs to be \in [-1, 1]"
+        assert bottom_right[0] >= -1 and bottom_right[1] <= 1, "bottom_right needs to be \in [-1, 1]"
+        x, y = [int(self.scale(top_left[0], 0, img_size[0]-1, -1, 1)),
+                int(self.scale(top_left[1], 0, img_size[1]-1, -1, 1))]
 
         # tabulate the size of the crop
-        _, crop_size = self._get_scale_and_size(crop[0], img_size, px=px)
+        br_x, br_y = [int(self.scale(bottom_right[0], 0, img_size[0]-1, -1, 1)),
+                      int(self.scale(bottom_right[1], 0, img_size[1]-1, -1, 1))]
+        crop_size = [br_x - x, br_y - y]
 
         # bound the (x, t) co-ordinates to be plausible
-        # i.e < img_size - crop_size
+        # i.e < img_size - crop_size and > crop_size
         max_coords = img_size - crop_size
-        x, y = min(x - px, max_coords[0]), min(y - px, max_coords[1]) # sub 1 for larger box
-        x, y = max(x, 0), max(y, 0) # because we sub 1
+        x, y = min(x, max_coords[0]), min(y, max_coords[1]) # fix issue on bottom-right
 
-        #return x, y, crop_size
         return x, y, crop_size
-
-    def _get_scale_and_size(self, scale, img_size, px):
-        # calculate the scale of the true crop using the provided scale
-        # Note: this is different from the return size, i.e. window_size
-        crop_scale = min(scale, self.max_img_percent)
-        crop_size = np.floor(img_size * crop_scale).astype(int)
-        crop_size[0] += 2*px; crop_size[1] += 2*px # add to create a larger box
-        crop_size = [max(crop_size[0], 2), max(crop_size[1], 2)] # ensure not too small
-        crop_size = [min(crop_size[0], img_size[0]), # ensure not larger than img
-                     min(crop_size[1], img_size[1])]
-        return crop_scale, crop_size
 
     @staticmethod
     def vimage_to_np(vimg, rescale=True, dtype=np.float32):
@@ -211,27 +205,14 @@ class CropLambda(object):
 
         return vimg_np
 
-    def __call__(self, crop_location, override=False):
-        ''' converts [crop_center, x, y] to a 4-tuple
-            defining the left, upper, right, and lower
-            pixel coordinate and returns a crop expanded
-            by crop_padding on all directions.
+    def __call__(self, top_left, bottom_right, override=False):
+        ''' converts crop_location = [nw, se] to a crop
+            and returns it after resizing to predefined window size
 
-        Example crop sizes:
-            crops =  28 3797 [203, 203]
-            crops =  2799 819 [1201, 1201]
-            crops =  2280 66 [690, 690]
-            crops =  2799 246 [1201, 1201]
-            crops =  30 1 [1201, 1201]
-            crops =  2911 2093 [7, 7]
-            crops =  1636 2193 [470, 470]
-            crops =  665 6 [1201, 1201]
-            crops =  2767 1076 [510, 510]
-            crops =  410 1776 [1201, 1201]
-            crops =  1772 2020 [1201, 1201]
-            crops =  1223 2563 [1201, 1201]
+            Arguments:
+              - crop_location: [ (nw_x, nw_y), (se_x, se_y) ]
+              - override: returns entire image if True
         '''
-        #access = 'sequential' if 'tif' not in self.path or 'tiff' not in self.path else 'random'
         img = pyvips.Image.new_from_file(self.path, access='sequential-unbuffered')
         img_size, chans = np.array([img.width, img.height]), img.bands # numpy-ize the img size (tuple)
         assert (img_size > 0).any(), "image [{}] had height[{}] and width[{}]".format(
@@ -240,14 +221,15 @@ class CropLambda(object):
 
         # get the crop dims
         self.max_img_percent = 1.0 if override is True else self.max_img_percent
-        x, y, crop_size = self._get_crop_sizing_and_centers(crop_location,
-                                                            img_size,
-                                                            self.crop_padding)
+        x, y, crop_size = self._get_crop_sizing_and_centers(top_left, bottom_right, img_size)
+        # print("x = ", x, " | y = ", y, " | crop_size = ", crop_size)
 
         # crop the actual image and then upsample it to window_size
         crop_img = img.crop(x, y, crop_size[0], crop_size[1])
-        crop_img = crop_img.resize((self.window_size + (2*self.crop_padding)) / crop_img.width,
-                                   vscale=(self.window_size + (2*self.crop_padding)) / crop_img.height)
+        if not override: # only resize if not overriding
+            crop_img = crop_img.resize(self.window_size / crop_img.width,
+                                       vscale=self.window_size / crop_img.height)
+
         crop_img_np = self.vimage_to_np(crop_img)
 
         # try to mitigate memory leak

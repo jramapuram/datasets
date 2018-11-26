@@ -10,6 +10,7 @@ from datasets.class_sampler import ClassSampler
 from datasets.cifar import CIFAR10Loader
 from datasets.nih_chest_xray import NIHChestXrayLoader
 from datasets.starcraft_predict_battle import StarcraftPredictBattleLoader
+from datasets.starcraft_predict_battle_hdf5 import StarcraftPredictBattleHDF5Loader
 from datasets.fashion_mnist import FashionMNISTLoader
 from datasets.mnist_cluttered import ClutteredMNISTLoader
 from datasets.mnist import MNISTLoader
@@ -28,6 +29,7 @@ loader_map = {
     'all_pairs': GridDataLoader,
     'nih_chest_xray': NIHChestXrayLoader,
     'starcraft_predict_battle': StarcraftPredictBattleLoader,
+    'starcraft_predict_battle_hdf5': StarcraftPredictBattleHDF5Loader,
     'crop_dual_imagefolder': CropDualImageFolderLoader,
     'mnist': MNISTLoader,
     'omniglot': OmniglotLoader,
