@@ -7,7 +7,7 @@ import numpy as np
 
 from PIL import Image
 from torchvision import datasets, transforms
-from torch.utils.serialization import load_lua
+# from torch.utils.serialization import load_lua
 
 from .utils import create_loader, normalize_train_test_images
 
