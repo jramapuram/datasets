@@ -7,20 +7,13 @@ import numpy as np
 
 from PIL import Image
 from torchvision import datasets, transforms
-from torch.utils.serialization import load_lua
 
 from .utils import create_loader, normalize_train_test_images
 
-def load_cluttered_mnist(path, segment='train'):
-    full = load_lua(os.path.join(path, '%s.t7'%segment))
-    data = [t[0].unsqueeze(1) for t in full]
-    labels = []
-    for t in full:
-        _, index = torch.max(t[1], 0)
-        labels.append(index.unsqueeze(0))
 
-    return [torch.cat(data).type(torch.FloatTensor).numpy(),
-            torch.cat(labels).squeeze().type(torch.LongTensor).numpy()]
+def load_cluttered_mnist(path, segment='train'):
+    loaded = np.load(os.path.join(path, "{}.npz".format(segment)))
+    return [loaded['data'], loaded['labels']]
 
 
 class ClutteredMNISTDataset(torch.utils.data.Dataset):
