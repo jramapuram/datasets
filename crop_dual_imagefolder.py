@@ -4,10 +4,12 @@ import torch
 import warnings
 import numpy as np
 import torchvision.transforms.functional as F
+import requests
 
 import random
 random.seed(1234) # fix the seed for shuffling
 
+from io import StringIO
 from cffi import FFI
 from PIL import Image
 from copy import deepcopy
@@ -173,20 +175,32 @@ class CropLambda(object):
         self.crop_padding = crop_padding
         self.max_img_percent = max_img_percentage
 
-    def scale(self, val, newmin, newmax, oldmin, oldmax):
+    @staticmethod
+    def scale(val, newmin, newmax, oldmin, oldmax):
         return (((val - oldmin) * (newmax - newmin)) / (oldmax - oldmin)) + newmin
+
+    @staticmethod
+    def clip_coords(coord, clip_limit):
+        return min((clip_limit - 1), max(coord, 0))
 
     def _get_crop_sizing_and_centers(self, top_left, bottom_right, img_size):
         # scale the (x, y) co-ordinates to the size of the image
         assert top_left[0] >= -1 and top_left[1] <= 1, "top_left needs to be \in [-1, 1]"
         assert bottom_right[0] >= -1 and bottom_right[1] <= 1, "bottom_right needs to be \in [-1, 1]"
-        x, y = [int(self.scale(top_left[0], 0, img_size[0]-1, -1, 1)),
-                int(self.scale(top_left[1], 0, img_size[1]-1, -1, 1))]
-
-        # tabulate the size of the crop
+        x, y = [int(np.floor(self.scale(top_left[0], 0, img_size[0]-1, -1, 1))),
+                int(np.floor(self.scale(top_left[1], 0, img_size[1]-1, -1, 1)))]
         br_x, br_y = [int(self.scale(bottom_right[0], 0, img_size[0]-1, -1, 1)),
                       int(self.scale(bottom_right[1], 0, img_size[1]-1, -1, 1))]
+
+        # clip in a similar manner as pytorch
+        x, y = [CropLambda.clip_coords(x, img_size[0]),
+                CropLambda.clip_coords(y, img_size[1])]
+        br_x, br_y = [CropLambda.clip_coords(br_x, img_size[0]),
+                      CropLambda.clip_coords(br_y, img_size[1])]
+
+        # tabulate the size of the crop
         crop_size = [br_x - x, br_y - y]
+        crop_size = [max(crop_size[0], 2), max(crop_size[1], 2)]
 
         # bound the (x, t) co-ordinates to be plausible
         # i.e < img_size - crop_size and > crop_size
@@ -205,6 +219,37 @@ class CropLambda(object):
 
         return vimg_np
 
+    # def __call__(self, top_left, bottom_right, img_size=[100, 100], override=False):
+    #     assert top_left[0] >= -1 and top_left[1] <= 1, "top_left needs to be \in [-1, 1]"
+    #     assert bottom_right[0] >= -1 and bottom_right[1] <= 1, "bottom_right needs to be \in [-1, 1]"
+
+    #     if override:
+    #         top_left = bottom_right = [0, 0]
+    #     else:
+    #         top_left = [int(np.floor(self.scale(top_left[0], 0, img_size[0]-1, -1, 1))),
+    #                     int(np.floor(self.scale(top_left[1], 0, img_size[1]-1, -1, 1)))]
+    #         bottom_right = [int(self.scale(bottom_right[0], 0, img_size[0]-1, -1, 1)),
+    #                         int(self.scale(bottom_right[1], 0, img_size[1]-1, -1, 1))]
+
+    #         # clip in a similar manner as pytorch
+    #         top_left = [CropLambda.clip_coords(top_left[0], img_size[0]),
+    #                     CropLambda.clip_coords(top_left[1], img_size[1])]
+    #         bottom_right = [CropLambda.clip_coords(bottom_right[0], img_size[0]),
+    #                         CropLambda.clip_coords(bottom_right[1], img_size[1])]
+
+    #     # format the URL and request the image
+    #     url = "http://localhost:39876{}?crop={},{},{},{}".format(
+    #         # self.fullpath.split('/')[-1],
+    #         self.path,
+    #         top_left[0], top_left[1],
+    #         bottom_right[0], bottom_right[1]
+    #     )
+    #     print("\n" + url + "\n")
+    #     req = requests.get(url)
+    #     return F.to_tensor(Image.open(StringIO(req.content)))
+
+
+
     def __call__(self, top_left, bottom_right, override=False):
         ''' converts crop_location = [nw, se] to a crop
             and returns it after resizing to predefined window size
@@ -213,8 +258,8 @@ class CropLambda(object):
               - crop_location: [ (nw_x, nw_y), (se_x, se_y) ]
               - override: returns entire image if True
         '''
-        img = pyvips.Image.new_from_file(self.path, access='sequential-unbuffered')
-        img_size, chans = np.array([img.width, img.height]), img.bands # numpy-ize the img size (tuple)
+        img = pyvips.Image.new_from_file(self.path, access='sequential')  # 'sequential-unbuffered'
+        img_size, chans = np.array([img.width, img.height]), img.bands    # numpy-ize the img size (tuple)
         assert (img_size > 0).any(), "image [{}] had height[{}] and width[{}]".format(
             self.path, img.height, img.width
         )
@@ -229,6 +274,9 @@ class CropLambda(object):
         if not override: # only resize if not overriding
             crop_img = crop_img.resize(self.window_size / crop_img.width,
                                        vscale=self.window_size / crop_img.height)
+        else:
+            crop_img = crop_img.resize(img_size[0] / crop_img.width,
+                                       vscale=img_size[1] / crop_img.height)
 
         crop_img_np = self.vimage_to_np(crop_img)
 
