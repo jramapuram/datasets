@@ -7,7 +7,7 @@ from copy import deepcopy
 from datasets.crop_dual_imagefolder import CropDualImageFolderLoader
 from datasets.all_pairs.grid_loader import GridDataLoader
 from datasets.class_sampler import ClassSampler
-from datasets.cifar import CIFAR10Loader
+from datasets.cifar import CIFAR10Loader, CIFAR100Loader
 from datasets.nih_chest_xray import NIHChestXrayLoader
 from datasets.starcraft_predict_battle import StarcraftPredictBattleLoader
 from datasets.starcraft_predict_battle_hdf5 import StarcraftPredictBattleHDF5Loader
@@ -16,6 +16,7 @@ from datasets.mnist_cluttered import ClutteredMNISTLoader
 from datasets.mnist import MNISTLoader
 from datasets.omniglot import OmniglotLoader
 from datasets.permuted_mnist import PermutedMNISTLoader
+from datasets.sort import SortLoader
 from datasets.svhn import SVHNCenteredLoader, SVHNFullLoader
 from datasets.imagefolder import ImageFolderLoader
 from datasets.multi_imagefolder import MultiImageFolderLoader
@@ -27,6 +28,7 @@ PERMUTE_SEED = 1
 
 loader_map = {
     'all_pairs': GridDataLoader,
+    'sort': SortLoader,
     'nih_chest_xray': NIHChestXrayLoader,
     'starcraft_predict_battle': StarcraftPredictBattleLoader,
     'starcraft_predict_battle_hdf5': StarcraftPredictBattleHDF5Loader,
@@ -37,6 +39,7 @@ loader_map = {
     'fashion': FashionMNISTLoader,
     'clutter': ClutteredMNISTLoader,
     'cifar10': CIFAR10Loader,
+    'cifar100': CIFAR100Loader,
     'svhn': SVHNCenteredLoader,
     'svhn_centered': SVHNCenteredLoader,
     'svhn_full': SVHNFullLoader,

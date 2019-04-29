@@ -43,7 +43,11 @@ class MNISTLoader(object):
         if transform:
             transform_list.extend(transform)
 
-        transform_list.append(transforms.ToTensor())
+        # add ToTensor if it isn't there
+        transform_names = [str(tt) for tt in transform_list]
+        if 'ToTensor()' not in transform_names:
+            transform_list.append(transforms.ToTensor())
+
         train_dataset = datasets.MNIST(path, train=True, download=True,
                                        transform=transforms.Compose(transform_list),
                                        target_transform=target_transform)
