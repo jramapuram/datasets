@@ -17,6 +17,7 @@ from datasets.mnist import MNISTLoader
 from datasets.omniglot import OmniglotLoader
 from datasets.permuted_mnist import PermutedMNISTLoader
 from datasets.sort import SortLoader
+from datasets.celeb_a import CelebALoader
 from datasets.svhn import SVHNCenteredLoader, SVHNFullLoader
 from datasets.imagefolder import ImageFolderLoader
 from datasets.multi_imagefolder import MultiImageFolderLoader
@@ -34,6 +35,7 @@ loader_map = {
     'starcraft_predict_battle_hdf5': StarcraftPredictBattleHDF5Loader,
     'crop_dual_imagefolder': CropDualImageFolderLoader,
     'mnist': MNISTLoader,
+    'celeba': CelebALoader,
     'omniglot': OmniglotLoader,
     'permuted': PermutedMNISTLoader,
     'fashion': FashionMNISTLoader,
