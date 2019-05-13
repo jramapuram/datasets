@@ -152,6 +152,10 @@ def read_generative_dataset(path, split='train'):
         zip_ref.close()
         print('..done')
 
+    # read the labels and the paths
+    labels_csv_path = os.path.join(path, 'list_attr_celeba.txt')
+    df = pd.read_csv(labels_csv_path, skiprows=[0], delim_whitespace=True)
+
     # read the eval datafame
     labels_csv_path = os.path.join(path, 'list_eval_partition.txt')
     eval_df = pd.read_csv(
@@ -162,11 +166,10 @@ def read_generative_dataset(path, split='train'):
     dataset, filenames = [], []
     split_map = {'train': 0, 'valid': 1, 'test': 2}
     requested_df = df[eval_df == split_map[split]]
-    filtered = requested_df[features[current_feature]][requested_df[features[current_feature]] == 1]
-    dataset = np.zeros_like(filtered.index.values)
-    filenames = filtered.index.values
+    dataset = np.zeros_like(requested_df.index.values)
+    filenames = requested_df.index.values
 
-    return filenames, np.zeros(len(filenames))
+    return filenames, dataset
 
 
 class CelebADataset(torch.utils.data.Dataset):
