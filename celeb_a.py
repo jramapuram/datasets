@@ -181,8 +181,11 @@ class CelebADataset(torch.utils.data.Dataset):
         self.target_transform = target_transform
 
         if download and not os.path.isdir(os.path.join(path, "img_align_celeba")): # pull the data
-            download_path = os.path.join(path, 'celeba.zip')
-            _download_file('https://s3-us-west-1.amazonaws.com/audacity-dlnfd/datasets/celeba.zip', download_path)
+            _download_file('https://gitlab.idiap.ch/bob/bob.db.celeba/raw/642079f38ee7639931dded3714039a77f8031304/bob/db/celeba/data/list_attr_celeba.txt',
+                           os.path.join(path, 'list_attr_celeba.txt'))
+            _download_file('https://gitlab.idiap.ch/bob/bob.db.celeba/raw/642079f38ee7639931dded3714039a77f8031304/bob/db/celeba/data/list_eval_partition.txt',
+                           os.path.join(path, 'list_eval_partition.txt'))
+            _download_file('https://s3-us-west-1.amazonaws.com/audacity-dlnfd/datasets/celeba.zip', os.path.join(path, 'celeba.zip'))
 
         # read the labels
         self.img_names, self.labels = read_sequential_dataset(path, split=split) if not is_generative \
