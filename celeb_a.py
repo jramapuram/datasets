@@ -73,6 +73,18 @@ def bool2int(x):
 
     return y
 
+
+def _extract_dataset(path):
+    extract_path = os.path.join(path, "img_align_celeba")
+    if not os.path.isdir(extract_path):
+        print('unzipping celebA...', end='', flush=True)
+        zip_path = os.path.join(path, 'celeba.zip')
+        zip_ref = zipfile.ZipFile(zip_path, 'r')
+        zip_ref.extractall(path)
+        zip_ref.close()
+        print('..done')
+
+
 # Global to keep track of current feature
 current_feature = 0
 def read_sequential_dataset(path, split='train', features=['Bald', 'Male',
@@ -98,14 +110,7 @@ def read_sequential_dataset(path, split='train', features=['Bald', 'Male',
     :rtype: np.array, np.array
 
     """
-    extract_path = os.path.join(path, "img_align_celeba")
-    if not os.path.isdir(extract_path):
-        print('unzipping celebA...', end='', flush=True)
-        zip_path = os.path.join(path, 'data.zip')
-        zip_ref = zipfile.ZipFile(zip_path, 'r')
-        zip_ref.extractall(path)
-        zip_ref.close()
-        print('..done')
+    _extract_dataset(path)
 
     # read the eval datafame
     labels_csv_path = os.path.join(path, 'list_eval_partition.txt')
@@ -143,14 +148,7 @@ def read_generative_dataset(path, split='train'):
     :rtype: np.array, np.array
 
     """
-    extract_path = os.path.join(path, "img_align_celeba")
-    if not os.path.isdir(extract_path):
-        print('unzipping celebA...', end='', flush=True)
-        zip_path = os.path.join(path, 'celeba.zip')
-        zip_ref = zipfile.ZipFile(zip_path, 'r')
-        zip_ref.extractall(path)
-        zip_ref.close()
-        print('..done')
+    _extract_dataset(path)
 
     # read the labels and the paths
     labels_csv_path = os.path.join(path, 'list_attr_celeba.txt')
@@ -182,9 +180,9 @@ class CelebADataset(torch.utils.data.Dataset):
         self.loader = pil_loader
         self.target_transform = target_transform
 
-        if download and not os.path.isdir(self.path): # pull the data
+        if download and not os.path.isdir(os.path.join(path, "img_align_celeba")): # pull the data
             download_path = os.path.join(path, 'celeba.zip')
-            _download_file('https://s3-us-west-1.amazonaws.com/udacity-dlnfd/datasets/celeba.zip', download_path)
+            _download_file('https://s3-us-west-1.amazonaws.com/audacity-dlnfd/datasets/celeba.zip', download_path)
 
         # read the labels
         self.img_names, self.labels = read_sequential_dataset(path, split=split) if not is_generative \

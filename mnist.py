@@ -9,7 +9,8 @@ class MNISTLoader(object):
     def __init__(self, path, batch_size, train_sampler=None, test_sampler=None,
                  transform=None, target_transform=None, use_cuda=1, **kwargs):
         # first get the datasets
-        train_dataset, test_dataset = self.get_datasets(path, transform, target_transform)
+        train_dataset, test_dataset = self.get_datasets(path, transform,
+                                                        target_transform)
 
         # build the loaders
         kwargs = {'num_workers': 4, 'pin_memory': True} if use_cuda else {}
