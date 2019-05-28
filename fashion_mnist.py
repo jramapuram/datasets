@@ -8,11 +8,11 @@ from .utils import binarize, create_loader
 
 class FashionMNISTLoader(object):
     def __init__(self, path, batch_size, train_sampler=None, test_sampler=None,
-                 transform=None, target_transform=None, binarize_images=True,
+                 transform=None, target_transform=None, binarize_images=False,
                  use_cuda=1, **kwargs):
         # first get the datasets, binarize fashionmnist though
         if binarize_images:
-            transform = [binarize] if transform is None else [transform, binarize]
+            transform = [binarize] if transform is None else [*transform, binarize]
 
         train_dataset, test_dataset = self.get_datasets(path, transform,
                                                         target_transform)
