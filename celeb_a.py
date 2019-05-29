@@ -61,6 +61,10 @@ def one_hot(feature_matrix):
 
 
 def _download_file(url, dest):
+    print("downloading {} to {}".format(url, dest))
+    if not os.path.isdir(os.path.dirname(dest)):
+        os.makedirs(os.path.dirname(dest))
+
     r = requests.get(url, allow_redirects=True)
     open(dest, 'wb').write(r.content)
 
