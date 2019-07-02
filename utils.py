@@ -2,6 +2,7 @@ import cv2
 cv2.setNumThreads(0)
 
 import torch
+import contextlib
 import numpy as np
 
 from copy import deepcopy
@@ -37,6 +38,19 @@ def permute_lambda(img, pixel_permutation):
     return Image.fromarray(
         img.reshape(-1, 1)[pixel_permutation].reshape(img_orig_shape)
     )
+
+
+# from https://tinyurl.com/yy3hyz4d
+# sets a temporary numpy seed in scoped context
+# eg: with temp_seed(1234):
+@contextlib.contextmanager
+def temp_seed(seed):
+    state = np.random.get_state()
+    np.random.seed(seed)
+    try:
+        yield
+    finally:
+        np.random.set_state(state)
 
 
 def normalize_images(imgs, mu=None, sigma=None, eps=1e-9):
