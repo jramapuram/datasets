@@ -61,13 +61,15 @@ class BinarizedMNISTDataset(torch.utils.data.Dataset):
 
     def __getitem__(self, index):
         target = self.labels[index]
-        img = Image.fromarray(self.imgs[index])
+        img = Image.fromarray(self.imgs[index], mode='L')
 
         if self.transform is not None:
             img = self.transform(img)
 
         if not isinstance(img, torch.Tensor):
             img = F.to_tensor(img)
+
+        img[img > 0] = 1.0 # XXX: workaround to upsample / downsample
 
         if self.target_transform is not None:
             target = self.target_transform(target)
