@@ -45,7 +45,7 @@ class BinarizedMNISTDataset(torch.utils.data.Dataset):
             _download_file(DATA_URL, dest_filename)
 
         # https://twitter.com/alemi/status/1042658244609499137
-        imgs, labels = np.split(imageio.imread(DATA_URL)[...,:3].ravel(), [-70000])
+        imgs, labels = np.split(imageio.imread(dest_filename)[...,:3].ravel(), [-70000])
         imgs = np.unpackbits(imgs).reshape((-1, 28, 28))
         imgs, labels = [np.split(y, [50000, 60000]) for y in (imgs, labels)]
         if split == 'train':
