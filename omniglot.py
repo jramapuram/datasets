@@ -1,20 +1,26 @@
 import os
+import numpy as np
 import torch.utils.data as data
 
-from torchvision import transforms
 from PIL import Image
-from os.path import join
-from torchvision.datasets.utils import download_url, check_integrity
+from copy import deepcopy
+from torchvision import transforms, datasets
 
 
-from .utils import create_loader
+from .utils import create_loader, temp_seed
 
 
 class OmniglotLoader(object):
     def __init__(self, path, batch_size, train_sampler=None, test_sampler=None,
                  transform=None, target_transform=None, use_cuda=1, **kwargs):
+        assert train_sampler is None and test_sampler is None, "omniglot loader does not support samplers"
+
         # first get the datasets
         train_dataset, test_dataset = self.get_datasets(path, transform, target_transform)
+
+        # use the non-standard solution used in Kanerva machine & Beta-VAE
+        #train_dataset, test_dataset, train_sampler, test_sampler = self.get_samplers(train_dataset, test_dataset)
+        train_dataset, test_dataset = self.get_samplers(train_dataset, test_dataset)
 
         # build the loaders
         kwargs = {'num_workers': 4, 'pin_memory': True} if use_cuda else {}
@@ -30,9 +36,71 @@ class OmniglotLoader(object):
                                          shuffle=False,
                                          **kwargs)
 
-        self.output_size = 964 # np.max(labels) gives this (+0)
-        self.batch_size = batch_size
-        self.img_shp = [1, 105, 105]
+        # self.output_size = 964 # np.max(labels) gives this (+0)
+        # self.batch_size = batch_size
+        # self.img_shp = [1, 105, 105]
+
+        # grab a test sample to get the size
+        test_img, _ = self.train_loader.__iter__().__next__()
+        self.img_shp = list(test_img.size()[1:])
+        print("derived image shape = ", self.img_shp)
+
+        # determine number of samples
+        self.output_size = 0
+        self.determine_output_size(self.train_loader, **kwargs)
+
+        # print dataset sizes
+        print("[train]\t {} samples".format(len(train_dataset)))
+        print("[test]\t {} samples".format(len(test_dataset)))
+
+    def get_samplers(self, train_dataset, test_dataset):
+        # make the train set larger as per Wu et. al (Kanerva Machine) & Burda et. al (Beta-VAE)
+        num_train_samples = 24345
+        # num_extra_train = 24345 - 17500
+        # num_test = 11900 - num_extra_train
+
+        # create one larger dataset
+        #new_train_dataset = data.ConcatDataset([train_dataset, test_dataset])
+        new_train_dataset = train_dataset + test_dataset
+        new_test_dataset = deepcopy(new_train_dataset)
+        num_test_samples = len(new_train_dataset) - num_train_samples
+
+        # build our subset samples and return both datasets
+        train_sampler, test_sampler = None, None
+        with temp_seed(1234):
+            full_dataset_range = np.random.permutation(np.arange(num_train_samples + num_test_samples))
+            train_range = full_dataset_range[0:num_train_samples]
+            test_range = full_dataset_range[num_train_samples:]
+            assert len(train_range) == num_train_samples
+            assert len(test_range) == num_test_samples
+            # train_sampler = data.SubsetRandomSampler(train_range)
+            # test_sampler = data.SubsetRandomSampler(test_range)
+            new_train_dataset = data.Subset(new_train_dataset, train_range)
+            new_test_dataset = data.Subset(new_test_dataset, test_range)
+
+        # return new_train_dataset, new_test_dataset, train_sampler, test_sampler
+
+        return new_train_dataset, new_test_dataset
+
+
+    def determine_output_size(self, train_loader, **kwargs):
+        # determine output size
+        if 'output_size' not in kwargs or kwargs['output_size'] is None:
+            for _, label in self.train_loader:
+                if not isinstance(label, (float, int)) and len(label) > 1:
+                    l = np.array(label).max()
+                    if l > self.output_size:
+                        self.output_size = l
+                else:
+                    l = label.max().item()
+                    if l > self.output_size:
+                        self.output_size = l
+
+            self.output_size = self.output_size + 1
+        else:
+            self.output_size = kwargs['output_size']
+
+        print("determined output_size: ", self.output_size)
 
     @staticmethod
     def get_datasets(path, transform=None, target_transform=None):
@@ -43,109 +111,59 @@ class OmniglotLoader(object):
         if transform:
             transform_list.extend(transform)
 
-        transform_list.append(transforms.ToTensor())
-        train_dataset = Omniglot(path, background=True, download=True,
-                                 transform=transforms.Compose(transform_list),
-                                 target_transform=target_transform)
-        test_dataset = Omniglot(path, background=False, download=True,
-                                transform=transforms.Compose(transform_list),
-                                target_transform=target_transform)
+        # add ToTensor if it isn't there
+        transform_names = [str(tt) for tt in transform_list]
+        if 'ToTensor()' not in transform_names:
+            transform_list.append(transforms.ToTensor())
+
+        train_dataset = datasets.Omniglot(path, background=True, download=True,
+                                          transform=transforms.Compose(transform_list),
+                                          target_transform=target_transform)
+        test_dataset = datasets.Omniglot(path, background=False, download=True,
+                                         transform=transforms.Compose(transform_list),
+                                         target_transform=target_transform)
+
+        with temp_seed(1234): # deterministic shuffle of test set
+            idx = np.random.permutation(np.arange(len(test_dataset._flat_character_images)))
+            first = np.array([i[0] for i in test_dataset._flat_character_images])[idx]
+            second = np.array([i[1] for i in test_dataset._flat_character_images])[idx].astype(np.int32)
+            test_dataset._flat_character_images = [(fi, si) for fi, si in zip(first, second)]
+
         return train_dataset, test_dataset
 
 
-# NOTE: not yet in torchvision, remove once it gets added
-#       remove all below (incl Omniglot dataset) once it is in place
-def list_dir(root, prefix=False):
-    """List all directories at a given root
-    Args:
-        root (str): Path to directory whose folders need to be listed
-        prefix (bool, optional): If true, prepends the path to each result, otherwise
-            only returns the name of the directories found
-    """
-    root = os.path.expanduser(root)
-    directories = list(
-        filter(
-            lambda p: os.path.isdir(os.path.join(root, p)),
-            os.listdir(root)
-        )
-    )
+class BinarizedOmniglotLoader(OmniglotLoader):
+    @staticmethod
+    def get_datasets(path, transform=None, target_transform=None):
+        if transform:
+            assert isinstance(transform, list)
 
-    if prefix is True:
-        directories = [os.path.join(root, d) for d in directories]
+        transform_list = []
+        if transform:
+            transform_list.extend(transform)
 
-    return directories
+        # add ToTensor if it isn't there
+        transform_names = [str(tt) for tt in transform_list]
+        if 'ToTensor()' not in transform_names:
+            transform_list.append(transforms.ToTensor())
+
+        train_dataset = BinarizedOmniglotDataset(path, background=True, download=True,
+                                                 transform=transforms.Compose(transform_list),
+                                                 target_transform=target_transform)
+        test_dataset = BinarizedOmniglotDataset(path, background=False, download=True,
+                                                transform=transforms.Compose(transform_list),
+                                                target_transform=target_transform)
+
+        with temp_seed(1234): # deterministic shuffle of test set
+            idx = np.random.permutation(np.arange(len(test_dataset._flat_character_images)))
+            first = np.array([i[0] for i in test_dataset._flat_character_images])[idx]
+            second = np.array([i[1] for i in test_dataset._flat_character_images])[idx].astype(np.int32)
+            test_dataset._flat_character_images = [(fi, si) for fi, si in zip(first, second)]
+
+        return train_dataset, test_dataset
 
 
-def list_files(root, suffix, prefix=False):
-    """List all files ending with a suffix at a given root
-    Args:
-        root (str): Path to directory whose folders need to be listed
-        suffix (str or tuple): Suffix of the files to match, e.g. '.png' or ('.jpg', '.png').
-            It uses the Python "str.endswith" method and is passed directly
-        prefix (bool, optional): If true, prepends the path to each result, otherwise
-            only returns the name of the files found
-    """
-    root = os.path.expanduser(root)
-    files = list(
-        filter(
-            lambda p: os.path.isfile(os.path.join(root, p)) and p.endswith(suffix),
-            os.listdir(root)
-        )
-    )
-
-    if prefix is True:
-        files = [os.path.join(root, d) for d in files]
-
-    return files
-
-class Omniglot(data.Dataset):
-    """`Omniglot <https://github.com/brendenlake/omniglot>`_ Dataset.
-    Args:
-        root (string): Root directory of dataset where directory
-            ``omniglot-py`` exists.
-        background (bool, optional): If True, creates dataset from the "background" set, otherwise
-            creates from the "evaluation" set. This terminology is defined by the authors.
-        transform (callable, optional): A function/transform that  takes in an PIL image
-            and returns a transformed version. E.g, ``transforms.RandomCrop``
-        target_transform (callable, optional): A function/transform that takes in the
-            target and transforms it.
-        download (bool, optional): If true, downloads the dataset zip files from the internet and
-            puts it in root directory. If the zip files are already downloaded, they are not
-            downloaded again.
-    """
-    folder = 'omniglot-py'
-    download_url_prefix = 'https://github.com/brendenlake/omniglot/raw/master/python'
-    zips_md5 = {
-        'images_background': '68d2efa1b9178cc56df9314c21c6e718',
-        'images_evaluation': '6b91aef0f799c5bb55b94e3f2daec811'
-    }
-
-    def __init__(self, root, background=True,
-                 transform=None, target_transform=None,
-                 download=False):
-        self.root = join(os.path.expanduser(root), self.folder)
-        self.background = background
-        self.transform = transform
-        self.target_transform = target_transform
-
-        if download:
-            self.download()
-
-        if not self._check_integrity():
-            raise RuntimeError('Dataset not found or corrupted.' +
-                               ' You can use download=True to download it')
-
-        self.target_folder = join(self.root, self._get_target_folder())
-        self._alphabets = list_dir(self.target_folder)
-        self._characters = sum([[join(a, c) for c in list_dir(join(self.target_folder, a))]
-                                for a in self._alphabets], [])
-        self._character_images = [[(image, idx) for image in list_files(join(self.target_folder, character), '.png')]
-                                  for idx, character in enumerate(self._characters)]
-        self._flat_character_images = sum(self._character_images, [])
-
-    def __len__(self):
-        return len(self._flat_character_images)
-
+class BinarizedOmniglotDataset(datasets.Omniglot):
     def __getitem__(self, index):
         """
         Args:
@@ -154,38 +172,10 @@ class Omniglot(data.Dataset):
         Returns:
             tuple: (image, target) where target is index of the target character class.
         """
-        image_name, character_class = self._flat_character_images[index]
-        image_path = join(self.target_folder, self._characters[character_class], image_name)
-        image = Image.open(image_path, mode='r').convert('L')
+        image, character_class = super(BinarizedOmniglotDataset, self).__getitem__(index)
 
-        if self.transform:
-            image = self.transform(image)
-
-        if self.target_transform:
-            character_class = self.target_transform(character_class)
+        # XXX: workaround to go back to B/W for grayscale
+        image = transforms.ToTensor()(transforms.ToPILImage()(image).convert('1'))
+        # image[image > 0.2] = 1.0 # XXX: workaround to upsample / downsample
 
         return image, character_class
-
-    def _check_integrity(self):
-        zip_filename = self._get_target_folder()
-        if not check_integrity(join(self.root, zip_filename + '.zip'), self.zips_md5[zip_filename]):
-            return False
-        return True
-
-    def download(self):
-        import zipfile
-
-        if self._check_integrity():
-            print('Files already downloaded and verified')
-            return
-
-        filename = self._get_target_folder()
-        zip_filename = filename + '.zip'
-        url = self.download_url_prefix + '/' + zip_filename
-        download_url(url, self.root, zip_filename, self.zips_md5[filename])
-        print('Extracting downloaded file: ' + join(self.root, zip_filename))
-        with zipfile.ZipFile(join(self.root, zip_filename), 'r') as zip_file:
-            zip_file.extractall(self.root)
-
-    def _get_target_folder(self):
-        return 'images_background' if self.background else 'images_evaluation'
