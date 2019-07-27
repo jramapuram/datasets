@@ -1,6 +1,5 @@
 import torch
 import numpy as np
-from scipy.misc import imread, imresize
 from torchvision import datasets, transforms
 
 from .utils import binarize, create_loader

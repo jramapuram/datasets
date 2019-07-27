@@ -74,6 +74,7 @@ class BinarizedMNISTDataset(torch.utils.data.Dataset):
         if self.target_transform is not None:
             target = self.target_transform(target)
 
+        target = target.astype(np.int64)
         return img, target
 
     def __len__(self):

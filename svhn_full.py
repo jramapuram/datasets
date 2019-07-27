@@ -5,7 +5,6 @@ import os.path
 import numpy as np
 import torch.utils.data as data
 from PIL import Image
-from scipy.misc import imread, imresize
 from torchvision.datasets.utils import download_url, check_integrity
 
 
@@ -97,8 +96,7 @@ class SVHNFull(data.Dataset):
         self.labels = self.find_number_in(self.df['full_num'].values)
 
         # load the images and resize to [32x32]
-        imgs = [np.expand_dims(imresize(imread(os.path.join(basedir, '%d.png' % f)),
-                                        size=[32, 32, 3], interp='lanczos'), 0)
+        imgs = [np.expand_dims(numpy.array(Image.fromarray(arr).resize((32, 32), Image.BILINEAR)), 0)
                 for f in range(1, num_samples+1)]
         self.data = np.vstack(imgs)
         self.data = np.transpose(self.data, (0, 3, 1, 2))
