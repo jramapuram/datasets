@@ -109,7 +109,7 @@ class SortLoader(AbstractLoader):
                                          target_transform=target_transform,
                                          use_cuda=use_cuda, **kwargs)
         self.train_sequence_length, self.img_shp = self._get_seqlen_and_output_size(self.train_loader)
-        self.test_sequence_length, _  = self._derive_seqlen_and_output_size(self.test_loader)
+        self.test_sequence_length, _  = self._get_seqlen_and_output_size(self.test_loader)
         self.output_size = get_output_size(**kwargs) * self.train_sequence_length
         self.loss_type = 'l2' # fixed
         print("derived output_size = ", self.output_size)
