@@ -15,7 +15,7 @@ from datasets.fashion_mnist import FashionMNISTLoader
 from datasets.mnist_cluttered import ClutteredMNISTLoader
 from datasets.mnist import MNISTLoader
 from datasets.binarized_mnist import BinarizedMNISTLoader
-from datasets.omniglot import OmniglotLoader, BinarizedOmniglotLoader
+from datasets.omniglot import OmniglotLoader, BinarizedOmniglotLoader, BinarizedOmniglotBurdaLoader
 from datasets.permuted_mnist import PermutedMNISTLoader
 from datasets.sort import SortLoader
 from datasets.celeb_a import CelebALoader
@@ -38,6 +38,7 @@ loader_map = {
     'mnist': MNISTLoader,
     'binarized_mnist': BinarizedMNISTLoader,
     'binarized_omniglot': BinarizedOmniglotLoader,
+    'binarized_omniglot_burda': BinarizedOmniglotBurdaLoader,
     'celeba': CelebALoader,
     'omniglot': OmniglotLoader,
     'permuted': PermutedMNISTLoader,

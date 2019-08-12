@@ -1,4 +1,5 @@
 import os
+import torch
 import numpy as np
 import torch.utils.data as data
 
@@ -6,7 +7,7 @@ from PIL import Image
 from copy import deepcopy
 from torchvision import transforms, datasets
 
-
+from .abstract_dataset import AbstractLoader
 from .utils import create_loader, temp_seed
 
 
@@ -179,3 +180,96 @@ class BinarizedOmniglotDataset(datasets.Omniglot):
         # image[image > 0.2] = 1.0 # XXX: workaround to upsample / downsample
 
         return image, character_class
+
+
+class BinarizedOmniglotBurdaDataset(torch.utils.data.Dataset):
+    def __init__(self, path, split='train', train=True, download=True,
+                 transform=None, target_transform=None, **kwargs):
+        self.split = split
+        self.path = os.path.expanduser(path)
+        self.transform = transform
+        self.target_transform = target_transform
+
+        # hard-coded
+        self.output_size = 0
+
+        # load the images-paths and labels
+        self.train_dataset, self.test_dataset = self.read_dataset(path)
+
+        # determine train-test split
+        if split == 'train':
+            self.imgs = self.train_dataset
+        else:
+            self.imgs = self.test_dataset
+
+        print("[{}] {} samples".format(split, len(self.imgs)))
+
+    def read_dataset(self, path):
+        import scipy.io as sio
+        data_file = os.path.join(path, 'chardata.mat')
+        if not os.path.isfile(data_file):
+            import requests
+            dataset_url = 'https://github.com/yburda/iwae/raw/master/datasets/OMNIGLOT/chardata.mat'
+            open(os.path.join(path, 'chardata.mat'), 'wb').write(requests.get(dataset_url, allow_redirects=True).content)
+
+        def reshape_data(data):
+            return data.reshape((-1, 1, 28, 28))#.reshape((-1, 28*28), order='fortran')
+
+        # read full dataset and return the train and test data
+        omni_raw = sio.loadmat(data_file)
+        train_data = reshape_data(omni_raw['data'].T.astype('float32'))
+        test_data = reshape_data(omni_raw['testdata'].T.astype('float32'))
+        return train_data, test_data
+
+    def __getitem__(self, index):
+        img = self.imgs[index]
+
+        if self.transform is not None:
+            img = self.transform(img)
+
+        if not isinstance(img, torch.Tensor):
+            img = torch.from_numpy(img)
+
+        target = 0
+        if self.target_transform is not None:
+            target = self.target_transform(target)
+
+        return img, target
+
+    def __len__(self):
+        return len(self.imgs)
+
+
+class EmptyToTensor(object):
+    ''' hack of ToTensor: since it is checked in superclass '''
+    def __repr__(self):
+        return 'ToTensor()'
+
+    def __call__(self, x):
+        return x
+
+
+class BinarizedOmniglotBurdaLoader(AbstractLoader):
+    def __init__(self, path, batch_size, train_sampler=None, test_sampler=None,
+                 transform=None, target_transform=None, use_cuda=1, **kwargs):
+        if isinstance(transform, list): # hack to do ToTensor()
+            transform.extend(EmptyToTensor())
+        else:
+            transform = [EmptyToTensor()]
+
+        # use the abstract class to build the loader
+        super(BinarizedOmniglotBurdaLoader, self).__init__(BinarizedOmniglotBurdaDataset, path=path,
+                                                           batch_size=batch_size,
+                                                           train_sampler=train_sampler,
+                                                           test_sampler=test_sampler,
+                                                           transform=transform,
+                                                           target_transform=target_transform,
+                                                           use_cuda=use_cuda, **kwargs)
+        self.output_size = 0    # burda has no labels
+        self.loss_type = 'none' # fixed
+        print("derived output size = ", self.output_size)
+
+        # grab a test sample to get the size
+        test_img, _ = self.train_loader.__iter__().__next__()
+        self.img_shp = list(test_img.size()[1:])
+        print("derived image shape = ", self.img_shp)
