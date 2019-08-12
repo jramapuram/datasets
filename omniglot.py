@@ -224,11 +224,13 @@ class BinarizedOmniglotBurdaDataset(torch.utils.data.Dataset):
     def __getitem__(self, index):
         img = self.imgs[index]
 
-        if self.transform is not None:
-            img = self.transform(img)
-
-        if not isinstance(img, torch.Tensor):
-            img = torch.from_numpy(img)
+        # handle transforms if requested
+        if self.transform is not None and len(self.transform.transforms) > 1:
+            img = transforms.ToTensor()(
+                self.transform(transforms.ToPILImage()(torch.from_numpy(img))))
+        else:
+            if not isinstance(img, torch.Tensor):
+                img = torch.from_numpy(img)
 
         target = 0
         if self.target_transform is not None:
@@ -253,7 +255,7 @@ class BinarizedOmniglotBurdaLoader(AbstractLoader):
     def __init__(self, path, batch_size, train_sampler=None, test_sampler=None,
                  transform=None, target_transform=None, use_cuda=1, **kwargs):
         if isinstance(transform, list): # hack to do ToTensor()
-            transform.extend(EmptyToTensor())
+            transform.extend([EmptyToTensor()])
         else:
             transform = [EmptyToTensor()]
 
