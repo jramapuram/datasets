@@ -200,7 +200,9 @@ class BinarizedOmniglotBurdaDataset(torch.utils.data.Dataset):
         if split == 'train':
             self.imgs = self.train_dataset
         else:
-            self.imgs = self.test_dataset
+            with temp_seed(1234):
+                perm = np.random.permutation(np.arange(len(self.test_dataset)))
+                self.imgs = self.test_dataset[perm]
 
         print("[{}] {} samples".format(split, len(self.imgs)))
 
