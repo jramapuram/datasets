@@ -212,6 +212,7 @@ class BinarizedOmniglotBurdaDataset(torch.utils.data.Dataset):
         if not os.path.isfile(data_file):
             import requests
             dataset_url = 'https://github.com/yburda/iwae/raw/master/datasets/OMNIGLOT/chardata.mat'
+            os.makedirs(path, exist_ok=True)
             open(os.path.join(path, 'chardata.mat'), 'wb').write(requests.get(dataset_url, allow_redirects=True).content)
 
         def reshape_data(data):
