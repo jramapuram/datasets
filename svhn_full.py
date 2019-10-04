@@ -66,38 +66,27 @@ class SVHNFull(data.Dataset):
             raise RuntimeError('Dataset not found or corrupted.' +
                                ' You can use download=True to download it')
 
+        # TODO: 'extra' split
         basedir = os.path.join(self.root, split)
-        if split == 'test':
-            num_samples = 13068
-            matlab_file = 'train_32x32.mat'
-        elif split == 'train':
-            num_samples = 33402
-            matlab_file = 'test_32x32.mat'
-
-        # extract the tar.gz if all the files dont exist
-        all_files_exist = True
-        for r in range(1, num_samples):
-            if not os.path.isfile(os.path.join(basedir, '%d.png' % r)):
-                all_files_exist = False
-
-        if not all_files_exist:
+        if not os.path.isdir(basedir):
             print("extracting files...")
             import tarfile
             tar = tarfile.open(os.path.join(self.root, self.filename), "r:gz")
             tar.extractall(path=self.root)
             tar.close()
         else:
-            print("skipping extraction")
+            print("directory exists, skipping extraction...")
 
         # load the h5py file and pull the correct key
         import h5py
         self.root_mat = h5py.File(os.path.join(basedir, 'digitStruct.mat'), 'r')
         self.df = self.create_dataset(self.root_mat, basedir)
         self.labels = self.find_number_in(self.df['full_num'].values)
+        print("data = [{}] | labels = [{}]".format(self.df.values.shape, self.labels.shape))
 
         # load the images and resize to [32x32]
-        imgs = [np.expand_dims(numpy.array(Image.fromarray(arr).resize((32, 32), Image.BILINEAR)), 0)
-                for f in range(1, num_samples+1)]
+        imgs = [np.expand_dims(np.array(Image.open(filename).resize((32, 32), Image.BILINEAR)), 0)
+                for filename in self.df['filename'].values]
         self.data = np.vstack(imgs)
         self.data = np.transpose(self.data, (0, 3, 1, 2))
 
