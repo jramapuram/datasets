@@ -114,8 +114,8 @@ def get_loader(args, transform=None, target_transform=None,
             # XXX: create transforms to resize and convert to rgb
             # this should be parameterized in the future
             transform_list = [
-                transforms.Resize((32, 32)), # XXX: parameterize
-                transforms.Lambda(lambda img: bw_2_rgb_lambda(img))
+                # transforms.Resize((28, 28)), # XXX: parameterize
+                # transforms.Lambda(lambda img: bw_2_rgb_lambda(img))
             ]
             if transform is not None and isinstance(transform, list):
                 transform_list = transform + transform_list
