@@ -57,19 +57,44 @@ def get_samplers(num_classes):
     return train_samplers, test_samplers, valid_samplers
 
 
-def get_loader(task, data_dir, batch_size, cuda,
+def get_loader(task: str, data_dir: str, batch_size: int, cuda: bool,
+               num_replicas: int = 0, seed: int = 42,
+               same_seed_workers: bool = False, timeout: int = 0,
                train_transform=None, train_target_transform=None,
                test_transform=None, test_target_transform=None,
                valid_transform=None, valid_target_transform=None,
                train_sampler=None, test_sampler=None, valid_sampler=None,
                increment_seed=True, sequentially_merge_test=True,
                **kwargs):
-    ''' increment_seed: increases permutation rng seed,
-        sequentially_merge_test: merge all the test sets sequentially '''
+    """Returns a loader with .train_loader, .test_loader and optionally .valid_loader
+
+    :param task: string task name
+    :param data_dir: string data directory
+    :param batch_size: batch size for each loaders
+    :param cuda: bool flag to enable pin_memory, etc
+    :param num_replicas: used with DistributedDataParallel
+    :param seed: seef for same_seed_workers, **ignored otherwise**
+    :param same_seed_workers: set the same seed on the workers
+    :param timeout: timeout for worker
+    :param train_transform: (optional) list of data transforms
+    :param train_target_transform: (optional) list of label transforms
+    :param test_transform: (optional) list of data transforms
+    :param test_target_transform: (optional) list of label transforms
+    :param valid_transform: (optional) list of data transforms
+    :param valid_target_transform: (optional) list of label transforms
+    :param train_sampler: (optional) data sampler
+    :param test_sampler: (optional) data sampler
+    :param valid_sampler: (optional) data sampler
+    :param increment_seed: used internally for get_split_data_loaders; increases permutation rng seed
+    :param sequentially_merge_test: used internally for get_split_data_loaders: merge all the test sets sequentially
+    :returns: AbstractLoader instance
+    :rtype:
+
+    """
     global PERMUTE_SEED
 
-    # overwrite data dir for fashion MNIST because it has issues being
-    # in the same directory as regular MNIST
+    # overwrite data dir for fashion MNIST because it has
+    # issues being in the same directory as regular MNIST
     if task == 'fashion':
         data_dir = os.path.join(data_dir, "fashion")
     else:

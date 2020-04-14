@@ -41,7 +41,7 @@ class AbstractLoader(object):
                  test_transform=None, test_target_transform=None,
                  valid_transform=None, valid_target_transform=None,
                  workers_per_replica=4, num_replicas=0, seed=42, same_seed_workers=False, timeout=0,
-                 pin_memory=True, drop_last=True, cuda=False):
+                 pin_memory=True, drop_last=True, cuda=False, **kwargs):
         """Load a dataset and wrap with loaders.
 
         :param batch_size: total batch size to use for datasets, auto-divided for dist-data-parallel

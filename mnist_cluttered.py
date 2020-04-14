@@ -57,8 +57,8 @@ class ClutteredMNISTLoader(AbstractLoader):
                  num_replicas=0, cuda=True, **kwargs):
 
         # Curry the train and test dataset generators.
-        train_generator = functools.partial(ClutteredMNISTDataset, path=path, split='train')
-        test_generator = functools.partial(ClutteredMNISTDataset, path=path, split='test')
+        train_generator = functools.partial(ClutteredMNISTDataset, path=path, segment='train')
+        test_generator = functools.partial(ClutteredMNISTDataset, path=path, segment='test')
 
         super(ClutteredMNISTLoader, self).__init__(batch_size=batch_size,
                                                    train_dataset_generator=train_generator,
