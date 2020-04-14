@@ -1,76 +1,54 @@
-import torch
 import numpy as np
-from torchvision import datasets, transforms
+from torchvision import transforms
 
-from .utils import permute_lambda, create_loader
+from .mnist import MNISTLoader
+from .utils import permute_lambda
 
 
-def generate_permutation(seed):
+def generate_permutation(seed, image_size=28*28):
+    """Creates a pixel-permutation using the seed and size."""
     orig_seed = np.random.get_state()
     np.random.seed(seed)
     # print("USING SEED ", seed)
-    perms = np.random.permutation(28*28)
+    perms = np.random.permutation(image_size)
     np.random.set_state(orig_seed)
     return perms
 
 
-class PermutedMNISTLoader(object):
-    def __init__(self, path, batch_size, train_sampler=None, test_sampler=None,
-                 transform=None, target_transform=None, use_cuda=1, **kwargs):
+def get_permutation_lambda_transform(pixel_permutation):
+    """Creates a torchvision transform for pixel permutation."""
+    return transforms.Lambda(lambda x: permute_lambda(x, pixel_permutation=pixel_permutation))
+
+
+class PermutedMNISTLoader(MNISTLoader):
+    """Adds a unique (fixed) pixel permutation to the entire dataset."""
+
+    def __init__(self, path, batch_size, num_replicas=0,
+                 train_sampler=None, test_sampler=None,
+                 train_transform=None, train_target_transform=None,
+                 test_transform=None, test_target_transform=None,
+                 cuda=True, **kwargs):
         # generate the unique permutation for this loader
-        seed = np.random.randint(1, 9999) if 'seed' not in kwargs else kwargs['seed']
+        seed = kwargs.get('seed', np.random.randint(1, 9999))
         perm = generate_permutation(seed)
-        perm_transform = PermutedMNISTLoader._get_permutation_lambda(perm)
-        if transform is not None:
-            if isinstance(transform, list):
-                transform.insert(0, perm_transform)
-        else:
-            transform = [perm_transform]
+        perm_transform = get_permutation_lambda_transform(perm)
 
-        # get the datasets
-        train_dataset, test_dataset = self.get_datasets(path, transform, target_transform)
+        def _append_perm_transform(transform_list):
+            """Adds the perm transform"""
+            if transform_list is not None:
+                assert isinstance(transform_list, (list, tuple))
+                transform_list.insert(0, perm_transform)
+            else:
+                transform_list = [perm_transform]
 
-        # build the loaders
-        kwargs = {'num_workers': 4, 'pin_memory': True} if use_cuda else {}
-        self.train_loader = create_loader(train_dataset,
-                                          train_sampler,
-                                          batch_size,
-                                          shuffle=True if train_sampler is None else False,
-                                          **kwargs)
+            return transform_list
 
-        self.test_loader = create_loader(test_dataset,
-                                         test_sampler,
-                                         batch_size,
-                                         shuffle=False,
-                                         **kwargs)
+        # adds the permutation transform to both train and test.
+        train_transform = _append_perm_transform(train_transform)
+        test_transform = _append_perm_transform(test_transform)
 
-        self.output_size = 10
-        self.batch_size = batch_size
-
-        # grab a test sample to get the size
-        test_img, _ = self.train_loader.__iter__().__next__()
-        #print('test img = ', test_img.shape)
-        self.img_shp = list(test_img.size()[1:])
-        #print("derived image shape = ", self.img_shp)
-
-    @staticmethod
-    def _get_permutation_lambda(pixel_permutation):
-        return transforms.Lambda(lambda x: permute_lambda(x, pixel_permutation=pixel_permutation))
-
-    @staticmethod
-    def get_datasets(path, transform=None, target_transform=None):
-        if transform:
-            assert isinstance(transform, list)
-
-        transform_list = []
-        if transform:
-            transform_list.extend(transform)
-
-        transform_list.append(transforms.ToTensor())
-        train_dataset = datasets.MNIST(path, train=True, download=True,
-                                       transform=transforms.Compose(transform_list),
-                                       target_transform=target_transform)
-        test_dataset = datasets.MNIST(path, train=False,
-                                      transform=transforms.Compose(transform_list),
-                                      target_transform=target_transform)
-        return train_dataset, test_dataset
+        super(PermutedMNISTLoader, self).__init__(path=path, batch_size=batch_size,
+                                                  train_transform=train_transform, test_transform=test_transform,
+                                                  train_sampler=train_sampler, train_target_transform=train_target_transform,
+                                                  test_sampler=test_sampler, test_target_transform=test_target_transform,
+                                                  num_replicas=num_replicas, cuda=cuda, **kwargs)

@@ -1,8 +1,6 @@
-import math
 import torch
-import numpy as np
-from torch.utils.data.dataset import Dataset, Subset
-from torch.utils.data.sampler import Sampler, SubsetRandomSampler
+from torch.utils.data.dataset import Subset
+from torch.utils.data.sampler import Sampler
 
 
 class ClassSampler(Sampler):

@@ -1,7 +1,12 @@
 import torch
+import functools
 from torch.utils.data import Dataset
 import numpy as np
+from PIL import Image
+
 from .grid_generator import SampleSpec
+from ..utils import temp_seed
+from ..abstract_dataset import AbstractLoader
 
 DEFAULT_PAIRS = 4
 DEFAULT_CLASSES = 4
@@ -15,19 +20,24 @@ def set_sample_spec(num_pairs, num_classes, reset_every=None, im_dim=76):
                              min_cell=15, max_cell=18, reset_every=reset_every)
 
 
+def numpy_to_PIL(img):
+    print("img_max = ", img.max(), " | min = ", img.min(), img.squeeze().shape)
+    return Image.fromarray(np.uint8(img.squeeze()*255))
+
+
 class ToTensor(object):
     """simple override to add context to ToTensor"""
     def __init__(self, numpy_base_type=np.float32):
         self.numpy_base_type = numpy_base_type
 
     def __call__(self, img):
-        #result = img.astype(self.numpy_base_type) - 0.5  # TODO: this is not the right place to subtract 0.5
         result = img.astype(self.numpy_base_type)
         result = np.expand_dims(result, axis=0)
         result = torch.from_numpy(result)
         return result
 
-class GridGenerator(Dataset):
+
+class OnlineGridGenerator(Dataset):
     def __init__(self, batch_size, batches_per_epoch,
                  transform=None,
                  target_transform=None):
@@ -37,9 +47,15 @@ class GridGenerator(Dataset):
         self.transform = transform
         self.target_transform = target_transform
 
-        # XXX: lots of other code does len(dataset) to get size,
-        #      so accommodate that with a simple 0 list
-        self.dataset = [0] * batches_per_epoch * batch_size
+        # lots of other code does len(dataloader.dataset) to get size,
+        class LenImplementor(object):
+            def __init__(self, length):
+                self.length = length
+
+            def __len__(self):
+                return self.length
+
+        self.dataset = LenImplementor(batches_per_epoch * batch_size)
 
     def __len__(self):
         return self.batches_per_epoch * self.batch_size
@@ -58,6 +74,7 @@ class GridGenerator(Dataset):
         self.current_batch += 1
         img, target = sample_spec.generate(1)
         img, target = np.squeeze(img), np.squeeze(target)
+        img = numpy_to_PIL(img)
 
         # apply our input transform
         if self.transform is not None:
@@ -74,50 +91,67 @@ class GridGenerator(Dataset):
         return img, target
 
 
-class GridDataLoader(object):
-    def __init__(self, path=None, batch_size=128, train_sampler=None, test_sampler=None,
-                 transform=None, target_transform=None, use_cuda=1,
-                 batches_per_epoch=500, test_frac=0.2, **kwargs):
-        self.batch_size = batch_size
-        self.batches_per_epoch = batches_per_epoch
-        self.output_size = 2
-
-        # build the torch train dataloader
-        kwargs = {'num_workers': 1, 'pin_memory': True} if use_cuda else {}
-        train_dataset = GridGenerator(batch_size, batches_per_epoch, transform=[ToTensor()])
-        self.train_loader = torch.utils.data.DataLoader(
-            train_dataset,
-            batch_size=batch_size,
-            drop_last=True,
-            shuffle=True,
-            **kwargs)
-
-        # tabulate samples counts
-        total_samples = batches_per_epoch * batch_size
-        num_test_batches = int(test_frac * total_samples) // batch_size
-        num_test_samples = num_test_batches * batch_size
+class FixedGridGenerator(Dataset):
+    """Simple helper to generate a fixed size dataset."""
+    def __init__(self, total_samples, transform, target_transform):
+        self.transform = transform
+        self.target_transform = target_transform
+        self.total_samples = total_samples
 
         # generate all test samples independently and store away
-        print("starting full test set [%d samples] generation [this might take a while]..." % num_test_samples)
-        old_state = np.random.get_state()
-        np.random.seed(123456)  # always make the same test set
-        test_imgs, test_labels, stats = sample_spec.blocking_generate_with_stats(num_test_samples)
-        print("generator retry rate = {}".format(stats['num_retries']/float(stats['num_generated'])))
-        np.random.set_state(old_state)
-        #test_dataset = torch.utils.data.TensorDataset(torch.from_numpy(test_imgs - 0.5), torch.from_numpy(test_labels))
-        test_dataset = torch.utils.data.TensorDataset(torch.from_numpy(test_imgs),
-                                                      torch.from_numpy(test_labels))
-        print("test samples successfully generated...")
+        print("starting fixed generation of %d samples. This might take a while..." % total_samples)
+        with temp_seed(123456):
+            self.dataset, self.labels, stats = sample_spec.blocking_generate_with_stats(total_samples)
+            print("dataset = ", self.dataset.shape)
+            self.dataset = [numpy_to_PIL(ti) for ti in self.dataset]
+            print("generator retry rate = {}".format(stats['num_retries'] / float(stats['num_generated'])))
+            print("test samples successfully generated...")
 
-        # generate test dataloader using above samples
-        self.test_loader = torch.utils.data.DataLoader(
-            test_dataset,
-            batch_size=batch_size,
-            drop_last=True,
-            shuffle=False,  # don't shuffle here to keep consistency
-            **kwargs)
+    def __len__(self):
+        return self.total_samples
 
-        # grab a test sample to set the size in the loader
-        test_img, _ = train_dataset.__next__()
-        self.img_shp = list(test_img.size())
+    def __getitem__(self, index):
+        target = self.labels[index]
+        img = numpy_to_PIL(self.dataset[index])
+
+        if self.transform is not None:
+            img = self.transform(img)
+
+        if self.target_transform is not None:
+            target = self.target_transform(target)
+
+        target = target.astype(np.int64)
+        return img, target
+
+
+class GridDataLoader(AbstractLoader):
+    """Simple all-pairs loader, there is no validation set (can be easily done)."""
+
+    def __init__(self, path, batch_size, num_replicas=0,
+                 train_sampler=None, test_sampler=None,
+                 train_transform=None, train_target_transform=None,
+                 test_transform=None, test_target_transform=None,
+                 cuda=True, batches_per_epoch=500, test_frac=0.2, **kwargs):
+
+        # Curry the train and test dataset generators.
+        train_generator = functools.partial(OnlineGridGenerator, batch_size=batch_size, batches_per_epoch=batches_per_epoch)
+        test_generator = functools.partial(FixedGridGenerator, total_samples=int(batches_per_epoch * batch_size * test_frac))
+
+        super(GridDataLoader, self).__init__(batch_size=batch_size,
+                                             train_dataset_generator=train_generator,
+                                             test_dataset_generator=test_generator,
+                                             train_sampler=train_sampler,
+                                             test_sampler=test_sampler,
+                                             train_transform=train_transform,
+                                             train_target_transform=train_target_transform,
+                                             test_transform=test_transform,
+                                             test_target_transform=test_target_transform,
+                                             num_workers=1, pin_memory=True,
+                                             num_replicas=num_replicas, cuda=cuda, **kwargs)
+        self.output_size = 2   # fixed
+        self.loss_type = 'ce'  # fixed
+
+        # grab a test sample to get the size
+        test_img, _ = self.train_loader.__iter__().__next__()
+        self.img_shp = list(test_img.size()[1:])
         print("derived image shape = ", self.img_shp)

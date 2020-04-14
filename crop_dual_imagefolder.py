@@ -1,31 +1,24 @@
 import os
-import gc
-import torch
-import warnings
+import functools
 import numpy as np
 import torchvision.transforms.functional as F
-import requests
 
-import random
-random.seed(1234) # fix the seed for shuffling
-
-from io import StringIO
 from cffi import FFI
 from PIL import Image
-from copy import deepcopy
-from torchvision import datasets, transforms
+from torchvision import datasets
 from torch.utils.data.dataloader import default_collate
-from contextlib import contextmanager
 from joblib import Parallel, delayed
 
+from .abstract_dataset import AbstractLoader
 
-from datasets.utils import create_loader
+import random
+random.seed(1234)  # fix the seed for shuffling
 
 
 # logic for loading:
 #   1) Rust library [best mem + best speed]
 #   2) pyvips       [poor mem + best speed]
-if os.path.isfile('./libs/libparallel_image_crop.so'): #XXX: hardcoded
+if os.path.isfile('./libs/libparallel_image_crop.so'):  # XXX: hardcoded
     USE_LIB = 'rust'
 else:
     try:
@@ -34,8 +27,8 @@ else:
         pyvips.cache_set_max(0)
         # warnings.warn("failure to load Rust : using VIPS backend")
         USE_LIB = 'pyvips'
-    except:
-        raise Exception("failed to load rust-lib and pyvips")
+    except Exception as e:
+        raise Exception("failed to load rust-lib and pyvips: {}".format(e))
 
 
 def collate(batch):
@@ -81,18 +74,18 @@ class RustParallelImageCrop(object):
         crops_output = np.ascontiguousarray(
             np.zeros(self.chans*self.window_size*self.window_size*batch_size, dtype=np.uint8)
         )
-        crops = crops.astype(np.float32) # force fp32 for ffi conversion
+        crops = crops.astype(np.float32)  # force fp32 for ffi conversion
         scales, x, y = [np.ascontiguousarray(crops[:, 0]),
                         np.ascontiguousarray(crops[:, 1]),
                         np.ascontiguousarray(crops[:, 2])]
 
         # execute the job in FFI
         self.lib.parallel_crop_and_resize(
-            self.ptr, self.ffi.new("char* []", path_keepalive) ,
-            self.ffi.cast("uint8_t*", crops_output.ctypes.data), # resultant crops
-            self.ffi.cast("float*", scales.ctypes.data),         # scale
-            self.ffi.cast("float*", x.ctypes.data),              # x
-            self.ffi.cast("float*", y.ctypes.data),              # y
+            self.ptr, self.ffi.new("char* []", path_keepalive),
+            self.ffi.cast("uint8_t*", crops_output.ctypes.data),  # resultant crops
+            self.ffi.cast("float*", scales.ctypes.data),          # scale
+            self.ffi.cast("float*", x.ctypes.data),               # x
+            self.ffi.cast("float*", y.ctypes.data),               # y
             self.window_size,
             self.chans,
             1.0 if override is True else self.max_image_percentage,
@@ -113,7 +106,7 @@ class RustParallelImageCrop(object):
         void destroy(void*);
         void* initialize(uint64_t, bool);
         void parallel_crop_and_resize(void*, char**, uint8_t*, float*, float*, float*, uint32_t, uint32_t, float, size_t);
-        """);
+        """)
 
         lib = ffi.dlopen(lib_path)
         return lib, ffi
@@ -126,6 +119,7 @@ class RustParallelImageCrop(object):
 
 def _apply(lbda, z_i, override):
     return lbda(z_i, override=override)
+
 
 class CropLambdaPool(object):
     def __init__(self, num_workers=0, **kwargs):
@@ -153,7 +147,7 @@ class CropLambdaPool(object):
         bottom_right_vec = bottom_right_vec.astype(np.float32)
 
         if USE_LIB != "rust":
-            return Parallel(n_jobs=self.num_workers, timeout=300)( # n_jobs=1 disables parallelization
+            return Parallel(n_jobs=self.num_workers, timeout=300)(  # n_jobs=1 disables parallelization
                 delayed(self._apply)(list_of_lambdas_or_strs[i], np.ascontiguousarray(top_left_vec[i]),
                                      np.ascontiguousarray(bottom_right_vec[i]), override=override)
                 for i in range(len(list_of_lambdas_or_strs)))
@@ -185,8 +179,8 @@ class CropLambda(object):
 
     def _get_crop_sizing_and_centers(self, top_left, bottom_right, img_size):
         # scale the (x, y) co-ordinates to the size of the image
-        assert top_left[0] >= -1 and top_left[1] <= 1, "top_left needs to be \in [-1, 1]"
-        assert bottom_right[0] >= -1 and bottom_right[1] <= 1, "bottom_right needs to be \in [-1, 1]"
+        assert top_left[0] >= -1 and top_left[1] <= 1, "top_left needs to be in [-1, 1]"
+        assert bottom_right[0] >= -1 and bottom_right[1] <= 1, "bottom_right needs to be in [-1, 1]"
         x, y = [int(np.floor(self.scale(top_left[0], 0, img_size[0]-1, -1, 1))),
                 int(np.floor(self.scale(top_left[1], 0, img_size[1]-1, -1, 1)))]
         br_x, br_y = [int(self.scale(bottom_right[0], 0, img_size[0]-1, -1, 1)),
@@ -215,40 +209,9 @@ class CropLambda(object):
         vimg_np = np.array(vimg.write_to_memory(), dtype=dtype)
         vimg_np = vimg_np.reshape(vimg_size[0], vimg_size[1], -1)
         if rescale:
-            vimg_np /= 255.0 # rescale to [0, 1]
+            vimg_np /= 255.0  # rescale to [0, 1]
 
         return vimg_np
-
-    # def __call__(self, top_left, bottom_right, img_size=[100, 100], override=False):
-    #     assert top_left[0] >= -1 and top_left[1] <= 1, "top_left needs to be \in [-1, 1]"
-    #     assert bottom_right[0] >= -1 and bottom_right[1] <= 1, "bottom_right needs to be \in [-1, 1]"
-
-    #     if override:
-    #         top_left = bottom_right = [0, 0]
-    #     else:
-    #         top_left = [int(np.floor(self.scale(top_left[0], 0, img_size[0]-1, -1, 1))),
-    #                     int(np.floor(self.scale(top_left[1], 0, img_size[1]-1, -1, 1)))]
-    #         bottom_right = [int(self.scale(bottom_right[0], 0, img_size[0]-1, -1, 1)),
-    #                         int(self.scale(bottom_right[1], 0, img_size[1]-1, -1, 1))]
-
-    #         # clip in a similar manner as pytorch
-    #         top_left = [CropLambda.clip_coords(top_left[0], img_size[0]),
-    #                     CropLambda.clip_coords(top_left[1], img_size[1])]
-    #         bottom_right = [CropLambda.clip_coords(bottom_right[0], img_size[0]),
-    #                         CropLambda.clip_coords(bottom_right[1], img_size[1])]
-
-    #     # format the URL and request the image
-    #     url = "http://localhost:39876{}?crop={},{},{},{}".format(
-    #         # self.fullpath.split('/')[-1],
-    #         self.path,
-    #         top_left[0], top_left[1],
-    #         bottom_right[0], bottom_right[1]
-    #     )
-    #     print("\n" + url + "\n")
-    #     req = requests.get(url)
-    #     return F.to_tensor(Image.open(StringIO(req.content)))
-
-
 
     def __call__(self, top_left, bottom_right, override=False):
         ''' converts crop_location = [nw, se] to a crop
@@ -259,7 +222,7 @@ class CropLambda(object):
               - override: returns entire image if True
         '''
         img = pyvips.Image.new_from_file(self.path, access='sequential')  # 'sequential-unbuffered'
-        img_size, chans = np.array([img.width, img.height]), img.bands    # numpy-ize the img size (tuple)
+        img_size, _ = np.array([img.width, img.height]), img.bands    # numpy-ize the img size (tuple)
         assert (img_size > 0).any(), "image [{}] had height[{}] and width[{}]".format(
             self.path, img.height, img.width
         )
@@ -271,7 +234,7 @@ class CropLambda(object):
 
         # crop the actual image and then upsample it to window_size
         crop_img = img.crop(x, y, crop_size[0], crop_size[1])
-        if not override: # only resize if not overriding
+        if not override:  # only resize if not overriding
             crop_img = crop_img.resize(self.window_size / crop_img.width,
                                        vscale=self.window_size / crop_img.height)
         else:
@@ -281,7 +244,8 @@ class CropLambda(object):
         crop_img_np = self.vimage_to_np(crop_img)
 
         # try to mitigate memory leak
-        del img; del crop_img
+        del img
+        del crop_img
         # gc.collect() # XXX: too slow
 
         return F.to_tensor(crop_img_np).unsqueeze(0)
@@ -300,7 +264,7 @@ def pil_loader(path):
 
 
 class CropDualImageFolder(datasets.ImageFolder):
-    """Inherits from Imagefolder and returns a lambda instead of an image"""
+    """Inherits from Imagefolder and returns a lambda instead of an image."""
     def __init__(self, root, transform=None, target_transform=None, **kwargs):
         assert 'window_size' in kwargs, "crop dual dataset needs a window_size"
         assert 'max_image_percentage' in kwargs, "crop dual dataset needs a max_image_percentage"
@@ -355,79 +319,46 @@ class CropDualImageFolder(datasets.ImageFolder):
 
         # then grab the cropping lambda (or path in the case of Rust)
         path, _ = self.imgs_lbda[index]
-        if USE_LIB != 'rust': # we return the crop object
+        if USE_LIB != 'rust':  # we return the crop object
             crop_lbda = CropLambda(path, window_size=self.window_size,
                                    crop_padding=self.crop_padding,
                                    max_img_percentage=self.max_img_percent)
-        else: # rust lib just needs a list of the paths
+        else:  # rust lib just needs a list of the paths
             crop_lbda = path
 
+        # Return the image, the lambda and the label
         return F.to_tensor(img), crop_lbda, target
 
 
-class CropDualImageFolderLoader(object):
-    def __init__(self, path, batch_size, train_sampler=None, test_sampler=None,
-                 transform=None, target_transform=None, use_cuda=1, **kwargs):
-        ''' assumes that the '''
-        # first get the datasets
-        train_dataset, test_dataset = self.get_datasets(path, transform,
-                                                        target_transform,
-                                                        **kwargs)
+class CropDualImageFolderLoader(AbstractLoader):
+    """Reads from two data directories where the second one is large and returns lambdas."""
 
-        # build the loaders, note that pinning memory **deadlocks** this loader!
-        kwargs_loader = {'num_workers': 4, 'pin_memory': True, 'collate_fn': collate} \
-            if use_cuda else {'collate_fn': collate}
-        self.train_loader = create_loader(train_dataset,
-                                          train_sampler,
-                                          batch_size,
-                                          shuffle=True if train_sampler is None else False,
-                                          **kwargs_loader)
+    def __init__(self, path, batch_size, num_replicas=0,
+                 train_sampler=None, test_sampler=None,
+                 train_transform=None, train_target_transform=None,
+                 test_transform=None, test_target_transform=None,
+                 cuda=True, **kwargs):
 
-        self.test_loader = create_loader(test_dataset,
-                                         test_sampler,
-                                         batch_size,
-                                         shuffle=False,
-                                         **kwargs_loader)
-        self.batch_size = batch_size
-        self.output_size = 0
+        # Curry the train and test dataset generators.
+        train_generator = functools.partial(CropDualImageFolder(), root=os.path.join(path, 'train'), **kwargs)
+        test_generator = functools.partial(CropDualImageFolder, root=os.path.join(path, 'test'), **kwargs)
 
-        # just one image to get the image sizing
-        _, (test_img, _) = self.train_loader.__iter__().__next__()
-        self.img_shp = list(test_img.size()[1:])
-        print("determined img_size: ", self.img_shp)
+        super(CropDualImageFolderLoader, self).__init__(batch_size=batch_size,
+                                                        train_dataset_generator=train_generator,
+                                                        test_dataset_generator=test_generator,
+                                                        train_sampler=train_sampler,
+                                                        test_sampler=test_sampler,
+                                                        train_transform=train_transform,
+                                                        train_target_transform=train_target_transform,
+                                                        test_transform=test_transform,
+                                                        test_target_transform=test_target_transform,
+                                                        num_replicas=num_replicas, cuda=cuda, **kwargs)
 
-        # iterate over the entire dataset to find the max label
-        if 'output_size' not in kwargs or kwargs['output_size'] is None:
-            for _, (_, label) in self.train_loader:
-                if not isinstance(label, (float, int)) and len(label) > 1:
-                    l = np.array(label).max()
-                    if l > self.output_size:
-                        self.output_size = l
-                else:
-                    l = label.max().item()
-                    if l > self.output_size:
-                        self.output_size = l
+        # grab a test sample to get the size
+        test_img, _ = self.train_loader.__iter__().__next__()
+        self.input_shape = list(test_img.size()[1:])
+        print("derived image shape = ", self.input_shape)
 
-            self.output_size = self.output_size + 1
-        else:
-            self.output_size = kwargs['output_size']
-
-        print("determined output_size: ", self.output_size)
-        assert self.output_size > 0, "could not determine output size"
-
-    @staticmethod
-    def get_datasets(path, transform=None, target_transform=None, **kwargs):
-        if transform:
-            assert isinstance(transform, list)
-
-        transform_list = []
-        if transform:
-            transform_list.extend(transform)
-
-        train_dataset = CropDualImageFolder(root=os.path.join(path, 'train'),
-                                            transform=transforms.Compose(transform_list),
-                                            target_transform=target_transform, **kwargs)
-        test_dataset = CropDualImageFolder(root=os.path.join(path, 'test'),
-                                           transform=transforms.Compose(transform_list),
-                                           target_transform=target_transform, **kwargs)
-        return train_dataset, test_dataset
+        # We need to iterate the dataset to get the crop size
+        self.loss_type = 'ce'  # fixed
+        self.output_size = self.determine_output_size()

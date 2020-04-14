@@ -1,70 +1,47 @@
 import os
-import torch
-import numpy as np
-from torchvision import datasets, transforms
+import functools
+from torchvision import datasets
 
-from .utils import create_loader
+from .abstract_dataset import AbstractLoader
 
 
-class ImageFolderLoader(object):
-    def __init__(self, path, batch_size, train_sampler=None, test_sampler=None,
-                 transform=None, target_transform=None, use_cuda=1, **kwargs):
-        # first get the datasets
-        train_dataset, test_dataset = self.get_datasets(path, transform, target_transform)
+class ImageFolderLoader(AbstractLoader):
+    """Simple pytorch image-folder loader."""
 
-        # build the loaders
-        kwargs_loader = {'num_workers': 4, 'pin_memory': True} if use_cuda else {}
-        self.train_loader = create_loader(train_dataset,
-                                          train_sampler,
-                                          batch_size,
-                                          shuffle=True if train_sampler is None else False,
-                                          **kwargs_loader)
+    def __init__(self, path, batch_size, num_replicas=0,
+                 train_sampler=None, test_sampler=None, valid_sampler=None,
+                 train_transform=None, train_target_transform=None,
+                 test_transform=None, test_target_transform=None,
+                 valid_transform=None, valid_target_transform=None,
+                 cuda=True, **kwargs):
+        # Curry the train and test dataset generators.
+        train_generator = functools.partial(datasets.ImageFolder, root=os.path.join(path, 'train'))
+        test_generator = functools.partial(datasets.ImageFolder, root=os.path.join(path, 'test'))
+        valid_generator = None
+        if os.path.isdir(os.path.join(path, 'valid')):
+            valid_generator = functools.partial(datasets.ImageFolder, root=os.path.join(path, 'valid'))
 
-        self.test_loader = create_loader(test_dataset,
-                                         test_sampler,
-                                         batch_size,
-                                         shuffle=False,
-                                         **kwargs_loader)
-        self.batch_size = batch_size
-        self.output_size = 0
+        super(ImageFolderLoader, self).__init__(batch_size=batch_size,
+                                                train_dataset_generator=train_generator,
+                                                test_dataset_generator=test_generator,
+                                                valid_dataset_generator=valid_generator,
+                                                train_sampler=train_sampler,
+                                                test_sampler=test_sampler,
+                                                valid_sampler=valid_sampler,
+                                                train_transform=train_transform,
+                                                train_target_transform=train_target_transform,
+                                                test_transform=test_transform,
+                                                test_target_transform=test_target_transform,
+                                                valid_transform=valid_transform,
+                                                valid_target_transform=valid_target_transform,
+                                                num_replicas=num_replicas, cuda=cuda, **kwargs)
 
-        # iterate over the entire dataset to find the max label
-        # but just one image to get the image sizing
+        # grab a test sample to get the size
         test_img, _ = self.train_loader.__iter__().__next__()
-        self.img_shp = list(test_img.size()[1:])
-        print("determined img_size: ", self.img_shp)
-        if 'output_size' not in kwargs or kwargs['output_size'] is None:
-            for _, label in self.train_loader:
-                if not isinstance(label, (float, int)) and len(label) > 1:
-                    l = np.array(label).max()
-                    if l > self.output_size:
-                        self.output_size = l
-                else:
-                    l = label.max().item()
-                    if l > self.output_size:
-                        self.output_size = l
+        self.input_shape = list(test_img.size()[1:])
+        print("derived image shape = ", self.input_shape)
 
-            self.output_size = self.output_size + 1
-        else:
-            self.output_size = kwargs['output_size']
-
-        print("determined output_size: ", self.output_size)
-        assert self.output_size > 0
-
-    @staticmethod
-    def get_datasets(path, transform=None, target_transform=None):
-        if transform:
-            assert isinstance(transform, list)
-
-        transform_list = []
-        if transform:
-            transform_list.extend(transform)
-
-        transform_list.append(transforms.ToTensor())
-        train_dataset = datasets.ImageFolder(root=os.path.join(path, 'train'),
-                                             transform=transforms.Compose(transform_list),
-                                             target_transform=target_transform)
-        test_dataset = datasets.ImageFolder(root=os.path.join(path, 'test'),
-                                            transform=transforms.Compose(transform_list),
-                                            target_transform=target_transform)
-        return train_dataset, test_dataset
+        # derive the output size using the imagefolder attr
+        self.loss_type = 'ce'  # TODO: how to incorporate other features?
+        self.output_size = len(self.train_loader.dataset.classes)
+        print("derived output size = ", self.output_size)

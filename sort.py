@@ -1,14 +1,8 @@
-import os
+import functools
 import torch
 import numpy as np
-import torchvision.transforms.functional as F
-
-from sklearn.preprocessing import LabelBinarizer
-from torchvision import datasets, transforms
-
 
 from .abstract_dataset import AbstractLoader
-from .utils import create_loader
 
 
 def generate_samples(num_samples, seq_len, output_size, max_digit):
@@ -30,29 +24,24 @@ def generate_samples(num_samples, seq_len, output_size, max_digit):
     return [data.astype(np.float32), labels]
 
 
-def get_output_size(**kwargs):
-    return 1 if 'output_size' not in kwargs else kwargs['output_size']
-
-
 class SortDataset(torch.utils.data.Dataset):
-    def __init__(self, path, split='train', train=True, download=True,
-                 transform=None, target_transform=None, **kwargs):
+    def __init__(self, split='train', transform=None, target_transform=None,
+                 num_samples=2000000, max_digit=1, sequence_length=10, output_size=1):
         self.split = split
         self.transform = transform
         self.target_transform = target_transform
 
-        # set the output size of sort to 512 if it is not set
-        self.output_size = get_output_size(**kwargs)
+        # set the output size of sort to 1 if it is not set
+        self.output_size = output_size
 
         # set the number of samples to 2 million by default
-        train_samples = 2000000 if 'num_samples' not in kwargs else kwargs['num_samples']
-        self.num_samples = train_samples if split == 'train' else int(train_samples*0.2)
+        self.num_samples = num_samples
 
         # max sorting range U ~ [0, max_digit]
-        self.max_digit = 1 if 'max_digit' not in kwargs else kwargs['max_digit']
+        self.max_digit = max_digit
 
         # set the sequence length if it isn't specified
-        self.sequence_length = 10 if 'sequence_length' not in kwargs else kwargs['sequence_length']
+        self.sequence_length = sequence_length
 
         # load the sort dataset and labels
         self.data, self.labels = generate_samples(self.num_samples,
@@ -71,11 +60,9 @@ class SortDataset(torch.utils.data.Dataset):
         if self.target_transform is not None:
             target = self.target_transform(target)
 
-        if not isinstance(data, torch.Tensor):
-            data = torch.from_numpy(data)
-
-        if not isinstance(target, torch.Tensor):
-            target = torch.from_numpy(target)
+        # ToTensor() seems to add an extra dimension, fix below.
+        if len(data.shape) > 2 and data.shape[0] == 1:
+            data = data.view(data.shape[1:])
 
         return data, target
 
@@ -83,48 +70,52 @@ class SortDataset(torch.utils.data.Dataset):
         return len(self.labels)
 
 
-class EmptyToTensor(object):
-    ''' hack of ToTensor: since it is checked in superclass '''
-    def __repr__(self):
-        return 'ToTensor()'
-
-    def __call__(self, x):
-        return x
-
-
 class SortLoader(AbstractLoader):
-    def __init__(self, path, batch_size, train_sampler=None, test_sampler=None,
-                 transform=None, target_transform=None, use_cuda=1, **kwargs):
-        if isinstance(transform, list): # hack to do ToTensor()
-            transform.extend(EmptyToTensor())
-        else:
-            transform = [EmptyToTensor()]
+    """Simple sort loader, there is no validation set."""
 
-        # use the abstract class to build the loader with the above
-        super(SortLoader, self).__init__(SortDataset, path=path,
-                                         batch_size=batch_size,
+    def __init__(self, path, batch_size, num_replicas=0,
+                 train_sampler=None, test_sampler=None, valid_sampler=None,
+                 train_transform=None, train_target_transform=None,
+                 test_transform=None, test_target_transform=None,
+                 valid_transform=None, valid_target_transform=None, cuda=True,
+
+                 # Custom kwargs for the sort dataset below
+                 num_train_samples=2000000, num_test_samples=int(0.2*2000000),
+                 num_valid_samples=int(0.2*2000000), max_digit=1,
+                 sequence_length=10, output_size=1, **kwargs):
+
+        # Curry the train and test dataset generators.
+        train_generator = functools.partial(SortDataset, split='train', num_samples=num_train_samples,
+                                            max_digit=max_digit, sequence_length=sequence_length,
+                                            output_size=output_size)
+        valid_generator = functools.partial(SortDataset, split='valid', num_samples=num_valid_samples,
+                                            max_digit=max_digit, sequence_length=sequence_length,
+                                            output_size=output_size)
+        test_generator = functools.partial(SortDataset, split='test', num_samples=num_test_samples,
+                                           max_digit=max_digit, sequence_length=sequence_length,
+                                           output_size=output_size)
+
+        super(SortLoader, self).__init__(batch_size=batch_size,
+                                         train_dataset_generator=train_generator,
+                                         test_dataset_generator=test_generator,
+                                         valid_dataset_generator=valid_generator,
                                          train_sampler=train_sampler,
                                          test_sampler=test_sampler,
-                                         transform=transform,
-                                         target_transform=target_transform,
-                                         use_cuda=use_cuda, **kwargs)
-        self.train_sequence_length, self.img_shp = self._get_seqlen_and_output_size(self.train_loader)
-        self.test_sequence_length, _  = self._get_seqlen_and_output_size(self.test_loader)
-        self.output_size = get_output_size(**kwargs) * self.train_sequence_length
-        self.loss_type = 'l2' # fixed
-        print("derived output_size = ", self.output_size)
-        print("derived train_sequence_length = ", self.train_sequence_length)
-        print("derived test_sequence_ength = ", self.test_sequence_length)
+                                         valid_sampler=valid_sampler,
+                                         train_transform=train_transform,
+                                         train_target_transform=train_target_transform,
+                                         test_transform=test_transform,
+                                         test_target_transform=test_target_transform,
+                                         valid_transform=valid_transform,
+                                         valid_target_transform=valid_target_transform,
+                                         num_replicas=num_replicas, cuda=cuda, **kwargs)
 
-    def _get_seqlen_and_output_size(self, loader):
-        """ Helper to get the lengths of train / test and output size
-
-        :param loader: the dataloader
-        :returns: seq_len and feature_size
-        :rtype: int, int
-
-        """
-        for data, label in loader:
-            assert len(data.shape) == 3
-            _, seq_len, feature_size = data.shape
-            return seq_len, feature_size
+        # Determine input-output sizing
+        test_sample, b = self.train_loader.__iter__().__next__()
+        print("label = ", b.shape)
+        assert len(test_sample.shape) == 3, "expect [B, T, F], got {}.".format(test_sample.shape)
+        _, seq_len, feature_size = test_sample.shape
+        self.input_shape = [seq_len, feature_size]
+        self.output_size = output_size * seq_len
+        print("derived input shape = ", self.input_shape)
+        print("derived output size = ", self.output_size)

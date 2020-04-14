@@ -1,12 +1,13 @@
 import os
 import torch
 import imageio
+import functools
 import numpy as np
 from PIL import Image
-from torchvision import transforms
 
 from .utils import temp_seed
 from .abstract_dataset import AbstractLoader
+
 
 def _download_file(url, dest):
     import requests
@@ -30,8 +31,8 @@ DATA_URL = 'https://github.com/jramapuram/datasets/releases/download/binary_mnis
 
 
 class BinarizedMNISTDataset(torch.utils.data.Dataset):
-    def __init__(self, path, split='train', train=True, download=True,
-                 transform=None, target_transform=None, is_generative=True, **kwargs):
+    def __init__(self, path, split='train', download=True,
+                 transform=None, target_transform=None, **kwargs):
         self.split = split
         self.path = os.path.expanduser(path)
         self.transform = transform
@@ -45,7 +46,7 @@ class BinarizedMNISTDataset(torch.utils.data.Dataset):
             _download_file(DATA_URL, dest_filename)
 
         # https://twitter.com/alemi/status/1042658244609499137
-        imgs, labels = np.split(imageio.imread(dest_filename)[...,:3].ravel(), [-70000])
+        imgs, labels = np.split(imageio.imread(dest_filename)[..., :3].ravel(), [-70000])
         imgs = np.unpackbits(imgs).reshape((-1, 28, 28))
         imgs, labels = [np.split(y, [50000, 60000]) for y in (imgs, labels)]
         if split == 'train':
@@ -66,10 +67,7 @@ class BinarizedMNISTDataset(torch.utils.data.Dataset):
         if self.transform is not None:
             img = self.transform(img)
 
-        if not isinstance(img, torch.Tensor):
-            img = F.to_tensor(img)
-
-        img[img > 0] = 1.0 # XXX: workaround to upsample / downsample
+        img[img > 0] = 1.0  # XXX: workaround to upsample / downsample
 
         if self.target_transform is not None:
             target = self.target_transform(target)
@@ -82,23 +80,32 @@ class BinarizedMNISTDataset(torch.utils.data.Dataset):
 
 
 class BinarizedMNISTLoader(AbstractLoader):
-    def __init__(self, path, batch_size, train_sampler=None, test_sampler=None,
-                 transform=None, target_transform=None, use_cuda=1,
-                 is_generative=True, **kwargs):
-        # use the abstract class to build the loader
-        super(BinarizedMNISTLoader, self).__init__(BinarizedMNISTDataset, path=path,
-                                                   batch_size=batch_size,
+    """Simple BinarizedMNIST loader, there is no validation set."""
+
+    def __init__(self, path, batch_size, num_replicas=0,
+                 train_sampler=None, test_sampler=None,
+                 train_transform=None, train_target_transform=None,
+                 test_transform=None, test_target_transform=None,
+                 cuda=True, **kwargs):
+
+        # Curry the train and test dataset generators.
+        train_generator = functools.partial(BinarizedMNISTDataset, path=path, split='train', download=True)
+        test_generator = functools.partial(BinarizedMNISTDataset, path=path, split='test', download=True)
+
+        super(BinarizedMNISTLoader, self).__init__(batch_size=batch_size,
+                                                   train_dataset_generator=train_generator,
+                                                   test_dataset_generator=test_generator,
                                                    train_sampler=train_sampler,
                                                    test_sampler=test_sampler,
-                                                   transform=transform,
-                                                   target_transform=target_transform,
-                                                   use_cuda=use_cuda,
-                                                   **kwargs)
-        self.output_size = 10
-        self.loss_type = 'sce' # fixed
-        print("derived output size = ", self.output_size)
+                                                   train_transform=train_transform,
+                                                   train_target_transform=train_target_transform,
+                                                   test_transform=test_transform,
+                                                   test_target_transform=test_target_transform,
+                                                   num_replicas=num_replicas, cuda=cuda, **kwargs)
+        self.output_size = 10  # fixed
+        self.loss_type = 'ce'  # fixed
 
         # grab a test sample to get the size
         test_img, _ = self.train_loader.__iter__().__next__()
-        self.img_shp = list(test_img.size()[1:])
-        print("derived image shape = ", self.img_shp)
+        self.input_shape = list(test_img.size()[1:])
+        print("derived image shape = ", self.input_shape)
