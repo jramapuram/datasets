@@ -1,8 +1,9 @@
 import os
+import numpy as np
 
 from datasets.crop_dual_imagefolder import CropDualImageFolderLoader
 from datasets.all_pairs.grid_loader import GridDataLoader
-from datasets.class_sampler import ClassSampler
+from datasets.samplers import ClassSampler
 from datasets.cifar import CIFAR10Loader, CIFAR100Loader
 from datasets.nih_chest_xray import NIHChestXrayLoader
 from datasets.starcraft_predict_battle import StarcraftPredictBattleLoader
@@ -17,7 +18,7 @@ from datasets.celeb_a import CelebALoader, CelebASequentialLoader
 from datasets.svhn import SVHNCenteredLoader, SVHNFullLoader
 from datasets.imagefolder import ImageFolderLoader
 from datasets.multi_imagefolder import MultiImageFolderLoader
-from datasets.utils import sequential_test_set_merger
+from datasets.utils import sequential_dataset_merger
 
 # ensures we get the same permutation
 PERMUTE_SEED = 1
@@ -58,24 +59,26 @@ def get_samplers(num_classes):
 
 
 def get_loader(task: str, data_dir: str, batch_size: int, cuda: bool,
-               num_replicas: int = 0, seed: int = 42,
-               same_seed_workers: bool = False, timeout: int = 0,
+               workers_per_replica: int = 2, num_replicas: int = 0, seed: int = 42,
+               same_seed_workers: bool = False, timeout: int = 0, pin_memory=True, drop_last=True,
                train_transform=None, train_target_transform=None,
                test_transform=None, test_target_transform=None,
                valid_transform=None, valid_target_transform=None,
                train_sampler=None, test_sampler=None, valid_sampler=None,
-               increment_seed=True, sequentially_merge_test=True,
-               **kwargs):
+               increment_seed=True, **kwargs):
     """Returns a loader with .train_loader, .test_loader and optionally .valid_loader
 
     :param task: string task name
     :param data_dir: string data directory
     :param batch_size: batch size for each loaders
     :param cuda: bool flag to enable pin_memory, etc
+    :param workers_per_replica: number of data loader threads per worker
     :param num_replicas: used with DistributedDataParallel
-    :param seed: seef for same_seed_workers, **ignored otherwise**
+    :param seed: seed for same_seed_workers, **ignored otherwise**
     :param same_seed_workers: set the same seed on the workers
     :param timeout: timeout for worker
+    :param pin_memory: pin memory for CUDA; default to true
+    :param drop_last: ensures equal sized minibatches
     :param train_transform: (optional) list of data transforms
     :param train_target_transform: (optional) list of label transforms
     :param test_transform: (optional) list of data transforms
@@ -85,8 +88,7 @@ def get_loader(task: str, data_dir: str, batch_size: int, cuda: bool,
     :param train_sampler: (optional) data sampler
     :param test_sampler: (optional) data sampler
     :param valid_sampler: (optional) data sampler
-    :param increment_seed: used internally for get_split_data_loaders; increases permutation rng seed
-    :param sequentially_merge_test: used internally for get_split_data_loaders: merge all the test sets sequentially
+    :param increment_seed: modifies RNG for permutation dataset
     :returns: AbstractLoader instance
     :rtype:
 
@@ -101,34 +103,53 @@ def get_loader(task: str, data_dir: str, batch_size: int, cuda: bool,
         data_dir = data_dir
 
     if '+' in task:  # the merge operand
-        loader = []
+        loaders = []
         for split in task.split('+'):
-            loader.append(get_loader(task=split,
-                                     data_dir=data_dir,
-                                     batch_size=batch_size,
-                                     cuda=cuda,
-                                     train_transform=train_transform,
-                                     train_target_transform=train_target_transform,
-                                     test_transform=test_transform,
-                                     test_target_transform=test_target_transform,
-                                     valid_transform=valid_transform,
-                                     valid_target_transform=valid_target_transform,
-                                     train_sampler=train_sampler,
-                                     test_sampler=test_sampler,
-                                     **kwargs))
+            loaders.append(get_loader(task=split,
+                                      data_dir=data_dir,
+                                      batch_size=batch_size,
+                                      cuda=cuda,
+                                      workers_per_replica=workers_per_replica,
+                                      num_replicas=num_replicas,
+                                      seed=seed,
+                                      same_selfeed_workers=same_seed_workers,
+                                      timeout=timeout,
+                                      pin_memory=pin_memory,
+                                      drop_last=drop_last,
+                                      train_transform=train_transform,
+                                      train_target_transform=train_target_transform,
+                                      test_transform=test_transform,
+                                      test_target_transform=test_target_transform,
+                                      valid_transform=valid_transform,
+                                      valid_target_transform=valid_target_transform,
+                                      train_sampler=train_sampler,
+                                      test_sampler=test_sampler,
+                                      **kwargs))
             if increment_seed:
                 PERMUTE_SEED += 1
 
-        PERMUTE_SEED = 1
-        if sequentially_merge_test:
-            loader = sequential_test_set_merger(loader)
-            # loader = simple_merger(loader, args.batch_size, args.cuda)
+        PERMUTE_SEED = 1  # Reset global seed here
+        has_valid = np.all([hasattr(l, 'valid_loader') for l in loaders])
+        splits = ['train', 'test'] if not has_valid else ['train', 'test', 'valid']
+        for split in splits:
+            loaders = sequential_dataset_merger(
+                loaders, split, fixed_shuffle=(split == 'test'))  # fixed shuffle test set
+
+        loader = loaders[-1]
     else:
         assert task in loader_map, "unknown task requested"
         if task == 'permuted':
             kwargs['seed'] = PERMUTE_SEED
 
-        return loader_map[task](path=data_dir, batch_size=batch_size,
+        return loader_map[task](path=data_dir,
+                                batch_size=batch_size,
+                                workers_per_replica=workers_per_replica,
+                                num_replicas=num_replicas,
+                                seed=seed,
+                                same_seed_workers=same_seed_workers,
+                                timeout=timeout,
+                                pin_memory=pin_memory,
+                                drop_last=drop_last,
                                 train_transform=train_transform,
                                 train_target_transform=train_target_transform,
                                 test_transform=test_transform,
@@ -154,13 +175,14 @@ def _check_for_sublist(loaders):
     return is_sublist
 
 
-def get_split_data_loaders(task, num_classes, data_dir, batch_size, cuda,
+def get_split_data_loaders(task: str, num_classes: int, data_dir: str, batch_size: int, cuda: bool,
+                           workers_per_replica: int = 2, num_replicas: int = 0, seed: int = 42,
+                           same_seed_workers: bool = False, timeout: int = 0, pin_memory=True, drop_last=True,
                            train_transform=None, train_target_transform=None,
                            test_transform=None, test_target_transform=None,
                            valid_transform=None, valid_target_transform=None,
                            sequentially_merge_test=True, **kwargs):
-    ''' helper to return the model and the loader '''
-    # we build 10 samplers as all of the below have 10 classes
+    '''Splits a loader into num_classes separate loaders (train_and_test) based on class idx.'''
     train_samplers, test_samplers, valid_samplers = get_samplers(num_classes=num_classes)
     global PERMUTE_SEED
 
@@ -169,6 +191,13 @@ def get_split_data_loaders(task, num_classes, data_dir, batch_size, cuda,
         for split in task.split('+'):
             loaders.extend([
                 get_loader(task=split, batch_size=batch_size, cuda=cuda,
+                           workers_per_replica=workers_per_replica,
+                           num_replicas=num_replicas,
+                           seed=seed,
+                           same_seed_workers=same_seed_workers,
+                           timeout=timeout,
+                           pin_memory=pin_memory,
+                           drop_last=drop_last,
                            train_transform=train_transform,
                            train_target_transform=train_target_transform,
                            test_transform=test_transform,
@@ -187,6 +216,13 @@ def get_split_data_loaders(task, num_classes, data_dir, batch_size, cuda,
     else:
         # iterate over samplers and generate
         loaders = [get_loader(task=task, batch_size=batch_size, cuda=cuda,
+                              workers_per_replica=workers_per_replica,
+                              num_replicas=num_replicas,
+                              seed=seed,
+                              same_seed_workers=same_seed_workers,
+                              timeout=timeout,
+                              pin_memory=pin_memory,
+                              drop_last=drop_last,
                               train_transform=train_transform,
                               train_target_transform=train_target_transform,
                               test_transform=test_transform,
@@ -206,6 +242,6 @@ def get_split_data_loaders(task, num_classes, data_dir, batch_size, cuda,
 
     PERMUTE_SEED = 1
     if sequentially_merge_test:  # merge test sets sequentially
-        return sequential_test_set_merger(loaders)
+        return sequential_dataset_merger(loaders, 'test')
 
     return loaders

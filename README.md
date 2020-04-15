@@ -26,12 +26,12 @@ Currently provides:
 ## loader.py
 
 This is the main entrypoint to the datasets.
-Loaders can be created with many optional parameters:
+Loaders can be created with many optional parameters, so don't fret the extra params:
 
 ``` python
 def get_loader(task: str, data_dir: str, batch_size: int, cuda: bool,
-               num_replicas: int = 0, seed: int = 42,
-               same_seed_workers: bool = False, timeout: int = 0,
+               workers_per_replica: int = 4, num_replicas: int = 0, seed: int = 42,
+               same_seed_workers: bool = False, timeout: int = 0, pin_memory=True, drop_last=True,
                train_transform=None, train_target_transform=None,
                test_transform=None, test_target_transform=None,
                valid_transform=None, valid_target_transform=None,
@@ -44,10 +44,13 @@ def get_loader(task: str, data_dir: str, batch_size: int, cuda: bool,
     :param data_dir: string data directory
     :param batch_size: batch size for each loaders
     :param cuda: bool flag to enable pin_memory, etc
+    :param workers_per_replica: number of data loader threads per worker
     :param num_replicas: used with DistributedDataParallel
-    :param seed: seef for same_seed_workers, **ignored otherwise**
+    :param seed: seed for same_seed_workers, **ignored otherwise**
     :param same_seed_workers: set the same seed on the workers
     :param timeout: timeout for worker
+    :param pin_memory: pin memory for CUDA; default to true
+    :param drop_last: ensures equal sized minibatches
     :param train_transform: (optional) list of data transforms
     :param train_target_transform: (optional) list of label transforms
     :param test_transform: (optional) list of data transforms
@@ -66,7 +69,7 @@ def get_loader(task: str, data_dir: str, batch_size: int, cuda: bool,
 ```
 
 **Note**: all simple datasets are auto-downloaded into `data_dir` if they dont exist there.
-For larger datasets (eg: mini-imagenet) the loader will expect the data to exist in `data_dir`.
+For larger datasets (eg: imagenet) the loader will expect the data to exist in `data_dir`.
 
 
 ## Dataloader structure

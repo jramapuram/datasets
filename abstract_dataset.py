@@ -32,7 +32,7 @@ def get_worker_init_fn(seed=42, same_seed_workers=False):
 
 
 class AbstractLoader(object):
-    def __init__(self, batch_size,
+    def __init__(self, batch_size: int,
                  train_dataset_generator,
                  test_dataset_generator,
                  valid_dataset_generator=None,
@@ -40,8 +40,9 @@ class AbstractLoader(object):
                  train_transform=None, train_target_transform=None,
                  test_transform=None, test_target_transform=None,
                  valid_transform=None, valid_target_transform=None,
-                 workers_per_replica=4, num_replicas=0, seed=42, same_seed_workers=False, timeout=0,
-                 pin_memory=True, drop_last=True, cuda=False, **kwargs):
+                 workers_per_replica: int = 2, num_replicas: int = 0, seed: int = 42,
+                 same_seed_workers: bool = False, timeout: int = 0,
+                 pin_memory: bool = True, drop_last: bool = True, cuda: bool = False, **kwargs):
         """Load a dataset and wrap with loaders.
 
         :param batch_size: total batch size to use for datasets, auto-divided for dist-data-parallel
@@ -87,7 +88,7 @@ class AbstractLoader(object):
 
         # Wrap the dataset with a loader with the (common) args below
         loader_kwargs = {'num_workers': workers_per_replica,
-                         'pin_memory': pin_memory,
+                         'pin_memory': pin_memory & cuda,
                          'worker_init_fn': worker_init_fn,
                          'timeout': timeout,
                          'drop_last': drop_last}

@@ -1,6 +1,25 @@
 import torch
+import numpy as np
+
 from torch.utils.data.dataset import Subset
 from torch.utils.data.sampler import Sampler
+
+import datasets.utils as utils
+
+
+class FixedRandomSampler(Sampler):
+    """Does a SINGLE fixed random transform of the dataset."""
+
+    def __init__(self, data_source):
+        self.data_source = data_source
+        with utils.temp_seed(1234):
+            self.fixed_perm = np.random.permutation(len(self.data_source))
+
+    def __iter__(self):
+        return iter(self.fixed_perm)
+
+    def __len__(self):
+        return len(self.data_source)
 
 
 class ClassSampler(Sampler):

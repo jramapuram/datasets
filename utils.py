@@ -4,25 +4,17 @@ import torch
 import contextlib
 import numpy as np
 
+from typing import Tuple
 from copy import deepcopy
 from PIL import Image
-from torch.utils.data.dataset import Subset
 
-from .class_sampler import ClassSampler
+from datasets.samplers import ClassSampler, FixedRandomSampler
 
 cv2.setNumThreads(0)  # since we use pytorch workers
 
 
-class GenericLoader(object):
-    """simple struct to hold properties of a loader."""
-    def __init__(self, img_shp, output_size, train_loader, test_loader):
-        self.img_shp = img_shp
-        self.output_size = output_size
-        self.train_loader = train_loader
-        self.test_loader = test_loader
-
-
-def resize_lambda(img, size=(64, 64)):
+def resize_lambda(img, size: Tuple[int, int]):
+    """converts np image to cv2 and resize."""
     if not isinstance(img, (np.float32, np.float64)):
         img = np.asarray(img)
 
@@ -33,6 +25,7 @@ def resize_lambda(img, size=(64, 64)):
 
 
 def permute_lambda(img, pixel_permutation):
+    """Permute pixels using provided pixel_permutation"""
     if not isinstance(img, (np.float32, np.float64)):
         img = np.asarray(img)
 
@@ -109,21 +102,16 @@ def normalize_train_test_images(train_imgs, test_imgs, eps=1e-9):
     return [train_imgs, normalize_images(test_imgs, mu=mu, sigma=sigma, eps=eps)]
 
 
-# def bw_2_rgb_lambda(img):
-#     if not isinstance(img, (np.float32, np.float64)):
-#         img = np.asarray(img)
-
-#     return cv2.cvtColor(img,cv2.COLOR_GRAY2RGB)
-
-
 def bw_2_rgb_lambda(img):
+    """simple helper to convert BG to RGB."""
     if img.mode == "RGB":
         return img
 
     return img.convert(mode="RGB")
 
 
-def binarize(img, block_size=21):
+def binarize(img, block_size: int = 21):
+    """Uses Otsu-thresholding to binarize an image."""
     if not isinstance(img, (np.float32, np.float64)):
         img = np.asarray(img)
 
@@ -133,7 +121,7 @@ def binarize(img, block_size=21):
 
 
 def find_max_label(loader):
-    """iterate over loader and find the max size."""
+    """iterate over loader and find the max label size."""
     max_label = 0
     for _, lbls in loader:
         max_seen_lbl = max(lbls)
@@ -203,43 +191,18 @@ def label_offset_merger(loaders, batch_size, use_cuda=False):
     return simple_merger(loaders, batch_size, use_cuda)
 
 
-def simple_merger(loaders, batch_size, use_cuda=False):
+def simple_merger(loaders):
     """Merges train and test datasets given a list of loaders."""
-
     print("""\nWARN [simplemerger]: no process in place for handling different classes,
 ignore this if you called label_offset_merger\n""")
 
-    train_dataset = loaders[0].train_loader.dataset
-    test_dataset = loaders[0].test_loader.dataset
-    img_shp = loaders[0].img_shp
-    output_size = loaders[-1].output_size
+    has_valid = np.all([hasattr(l, 'valid_loader') for l in loaders])
+    splits = ['train', 'test'] if not has_valid else ['train', 'test', 'valid']
+    for split in splits:
+        loaders = sequential_dataset_merger(
+            loaders, split, fixed_shuffle=(split == 'test'))  # fixed shuffle test set
 
-    for loader in loaders[1:]:
-        train_dataset += loader.train_loader.dataset
-        test_dataset += loader.test_loader.dataset
-        assert img_shp == loader.img_shp
-        # assert output_size == loader.output_size
-
-    kwargs = {'num_workers': 4, 'pin_memory': True} if use_cuda else {}
-    train_loader = torch.utils.data.DataLoader(
-        train_dataset,
-        batch_size=batch_size,
-        drop_last=True,
-        shuffle=True,
-        **kwargs
-    )
-    test_loader = torch.utils.data.DataLoader(
-        test_dataset,
-        batch_size=batch_size,
-        drop_last=True,
-        shuffle=True,
-        **kwargs
-    )
-
-    return GenericLoader(img_shp,
-                         output_size,
-                         train_loader,
-                         test_loader)
+    return loaders[-1]
 
 
 def create_loader(dataset, sampler, batch_size, shuffle,
@@ -279,8 +242,59 @@ def create_loader(dataset, sampler, batch_size, shuffle,
         worker_init_fn=worker_init_fn)
 
 
+def sequential_dataset_merger(loaders, split='test', fixed_shuffle=False):
+    """Given a list of loaders, merge their test/train/valid sets in each new loader.
+       Other splits (split != split) are kept the same.
+
+       Eg: [L1, L2, L3] --> [split(L1), split(L1+L2), split(L1+L2+L3)].
+
+    :param loaders: list of loaders with .'split'_loader member populated
+    :param split: dataset split, eg: test, train, valid
+    :param fixed_shuffle: forces a single FIXED shuffle (useful when merging test sets).
+    :returns: the list of loaders with the merge completed.
+    :rtype: list
+
+    """
+    # Grab the underlying dataset
+    datasets = [getattr(l, split + "_loader").dataset for l in loaders]
+
+    for idx in range(len(datasets)):
+        current_dataset = deepcopy(datasets[idx])  # copy to create new
+        for ds in datasets[0:idx]:                 # add all previous datasets
+            current_dataset += ds
+
+        # Get the current data loader and its sampler
+        current_loader = getattr(loaders[idx], split + "_loader")
+        current_sampler = current_loader.sampler
+
+        # Handle the sampler and shuffling
+        is_shuffled = isinstance(current_loader.sampler, torch.utils.data.RandomSampler)
+        new_sampler = current_sampler
+        if is_shuffled and not fixed_shuffle:  # ds is shuffled, but dont require fixed shuffle
+            new_sampler = None
+        elif fixed_shuffle:                    # require fixed shuffle
+            new_sampler = FixedRandomSampler(current_dataset)
+        else:
+            raise ValueError("Unknown sampler / fixed_shuffle combo.")
+
+        # Build the new loader using the existing dataloader
+        new_dataloader = create_loader(current_dataset,
+                                       sampler=new_sampler,
+                                       batch_size=current_loader.batch_size,
+                                       shuffle=is_shuffled and not fixed_shuffle,
+                                       pin_memory=current_loader.pin_memory,
+                                       drop_last=current_loader.drop_last,
+                                       num_workers=current_loader.num_workers,
+                                       timeout=current_loader.timeout,
+                                       worker_init_fn=current_loader.worker_init_fn)
+        setattr(loaders[idx], split + "_loader", new_dataloader)
+
+    return loaders
+
+
 def sequential_test_set_merger(loaders):
-    """Given a list of loaders, merge their test sets in each new loader.
+    """Given a list of loaders, merge their test sets in each new loader
+       while keeping the other sets the same. Syntactic sygar for sequential_dataset_set_merger.
 
        Eg: [L1, L2, L3] --> [L1, L1+L2(test), L1+L2+L3(test)].
 
@@ -289,19 +303,4 @@ def sequential_test_set_merger(loaders):
     :rtype: list
 
     """
-    test_dataset = [loaders[0].test_loader.dataset]
-    for loader in loaders[1:]:
-        current_clone = deepcopy(loader.test_loader.dataset)
-        for td in test_dataset:
-            loader.test_loader.dataset += td
-
-        # re-create the test loader
-        # in order to get correct samples
-        loader.test_loader \
-            = create_loader(loader.test_loader.dataset,
-                            None,  # loader.test_loader.sampler,
-                            loader.test_loader.batch_size,
-                            shuffle=True)
-        test_dataset.append(current_clone)
-
-    return loaders
+    return sequential_dataset_merger(loaders, split='train', fixed_shuffle=True)
