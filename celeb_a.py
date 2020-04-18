@@ -1,38 +1,14 @@
 import os
 import zipfile
+import functools
 import requests
-#import urllib.request
 import pandas as pd
 import numpy as np
 import torch
-import numpy as np
-import torchvision.transforms.functional as F
 
 from PIL import Image
-from sklearn.preprocessing import LabelBinarizer
-from torchvision import datasets, transforms
-
 
 from .abstract_dataset import AbstractLoader
-from .utils import create_loader
-
-try:
-    import pyvips
-    # pyvips.leak_set(True)
-    # pyvips.cache_set_max_mem(10000)
-    pyvips.cache_set_max(0)
-    USE_PYVIPS = True
-    # print("using VIPS backend")
-except:
-    # print("failure to load VIPS: using PIL backend")
-    USE_PYVIPS = False
-
-def vips_loader(path):
-    img = pyvips.Image.new_from_file(path, access='sequential')
-    height, width = img.height, img.width
-    img_np = np.array(img.write_to_memory()).reshape(height, width, -1)
-    del img # mitigate tentative memory leak in pyvips
-    return img_np
 
 
 def pil_loader(path):
@@ -44,22 +20,6 @@ def pil_loader(path):
             return img.convert('RGB')
 
 
-def one_hot_np(num_cols, indices):
-    num_rows = len(indices)
-    mat = np.zeros((num_rows, num_cols))
-    mat[np.arange(num_rows), indices] = 1
-    return mat
-
-
-def one_hot(feature_matrix):
-    assert len(feature_matrix.shape) == 2
-    maxes = [feature_matrix[:, i].max() for i in range(feature_matrix.shape[-1])]
-    column_features = [one_hot_np(max_val+1, col) for max_val, col in zip(maxes, feature_matrix.T)]
-    stacked = np.concatenate(column_features, -1)
-    #return to_binary(stacked)
-    return stacked
-
-
 def _download_file(url, dest):
     print("downloading {} to {}".format(url, dest))
     if not os.path.isdir(os.path.dirname(dest)):
@@ -67,15 +27,6 @@ def _download_file(url, dest):
 
     r = requests.get(url, allow_redirects=True)
     open(dest, 'wb').write(r.content)
-
-
-def bool2int(x):
-    # https://tinyurl.com/y7hgxbzs
-    y = 0
-    for i,j in enumerate(x):
-        y += j << i
-
-    return y
 
 
 def _extract_dataset(path):
@@ -91,6 +42,8 @@ def _extract_dataset(path):
 
 # Global to keep track of current feature
 current_feature = 0
+
+
 def read_sequential_dataset(path, split='train', features=['Bald', 'Male',
                                                            'Young', 'Eyeglasses',
                                                            'Wearing_Hat', 'Attractive']):
@@ -143,20 +96,16 @@ def read_sequential_dataset(path, split='train', features=['Bald', 'Male',
     return filenames, dataset
 
 
-def read_generative_dataset(path, split='train'):
-    """ Read the generative dataset (no labels)
+def read_filenames_and_labels(path, split='train'):
+    """ Process all filenames and labels.
 
     :param path: the base path
-    :param split: train/test /valid
-    :returns: filenames, zeros for labels
+    :param split: train / test /valid
+    :returns: filenames, labels
     :rtype: np.array, np.array
 
     """
     _extract_dataset(path)
-
-    # read the labels and the paths
-    labels_csv_path = os.path.join(path, 'list_attr_celeba.txt')
-    df = pd.read_csv(labels_csv_path, skiprows=[0], delim_whitespace=True)
 
     # read the eval datafame
     labels_csv_path = os.path.join(path, 'list_eval_partition.txt')
@@ -164,23 +113,29 @@ def read_generative_dataset(path, split='train'):
         labels_csv_path, delim_whitespace=True, header=None
     ).values[:, 1].astype(np.int32)
 
-    # extract the correct split and return 0s for the labels
-    dataset, filenames = [], []
+    # read the labels and the paths
+    labels_csv_path = os.path.join(path, 'list_attr_celeba.txt')
+    df = pd.read_csv(labels_csv_path, skiprows=[0], delim_whitespace=True)
+
+    # extract only the features requested and make them a class
     split_map = {'train': 0, 'valid': 1, 'test': 2}
     requested_df = df[eval_df == split_map[split]]
-    dataset = np.zeros_like(requested_df.index.values)
-    filenames = requested_df.index.values
+    labels = requested_df.values
 
-    return filenames, dataset
+    # the final labels and filenames
+    labels[labels == -1] = 0  # celeba likes to use -1 for 0 =/
+    filenames = requested_df.index.values
+    return filenames, labels
 
 
 class CelebADataset(torch.utils.data.Dataset):
-    def __init__(self, path, split='train', train=True, download=True,
-                 transform=None, target_transform=None, is_generative=True, **kwargs):
+    def __init__(self, path, split='train',  download=True,
+                 transform=None, target_transform=None,
+                 is_sequential=False, dataset_to_memory=False, **kwargs):
         self.split = split
+        self.is_in_memory = False
         self.path = os.path.join(os.path.expanduser(path), "img_align_celeba")
         self.transform = transform
-        #self.loader = vips_loader if USE_PYVIPS is True else pil_loader
         self.loader = pil_loader
         self.target_transform = target_transform
 
@@ -191,21 +146,54 @@ class CelebADataset(torch.utils.data.Dataset):
                            os.path.join(path, 'list_eval_partition.txt'))
             _download_file('https://s3-us-west-1.amazonaws.com/audacity-dlnfd/datasets/celeba.zip', os.path.join(path, 'celeba.zip'))
 
-        # read the labels
-        self.img_names, self.labels = read_sequential_dataset(path, split=split) if not is_generative \
-            else read_generative_dataset(path, split=split)
-        self.output_size = 1 if is_generative else 255
+        # read the labels and filenames
+        self.img_names, self.labels = read_sequential_dataset(path, split=split) if is_sequential \
+            else read_filenames_and_labels(path, split=split)
         print("[{}] {} samples".format(split, len(self.labels)))
 
+        # Load into memory if requested
+        if dataset_to_memory:
+            self.to_memory()
+
+    def to_memory(self):
+        if self.is_in_memory is False:
+            print("Loading CelebA images into memory...", end=' ', flush=True)
+            self.imgs = [self.loader(os.path.join(self.path, img_filename))
+                         for img_filename in self.img_names]
+            # NOTE: this is probably not what you want due to rng augmentations
+            # if self.transform is not None:
+            #     self.imgs = [self.transform(img) for img in self.imgs]
+
+            self.is_in_memory = True
+            print("completed!")
+
     def __getitem__(self, index):
+        """Returns the online or in-memory getter."""
+        if self.is_in_memory:
+            return self._getitem_memory(index)
+
+        return self._getitem_online(index)
+
+    def _getitem_memory(self, index):
+        """Simply returns transformed loaded image."""
+        target = self.labels[index]
+        img = self.imgs[index]
+
+        if self.transform is not None:
+            img = self.transform(img)
+
+        if self.target_transform is not None:
+            target = self.target_transform(target)
+
+        return img, target
+
+    def _getitem_online(self, index):
+        """Normal getter: reads images via threads."""
         target = self.labels[index]
         img = self.loader(os.path.join(self.path, self.img_names[index]))
 
         if self.transform is not None:
             img = self.transform(img)
-
-        if not isinstance(img, torch.Tensor):
-            img = F.to_tensor(img)
 
         if self.target_transform is not None:
             target = self.target_transform(target)
@@ -216,28 +204,76 @@ class CelebADataset(torch.utils.data.Dataset):
         return len(self.labels)
 
 
-class CelebALoader(AbstractLoader):
-    def __init__(self, path, batch_size, train_sampler=None, test_sampler=None,
-                 transform=None, target_transform=None, use_cuda=1,
-                 is_generative=True, **kwargs):
-        # use the abstract class to build the loader
-        super(CelebALoader, self).__init__(CelebADataset, path=path,
-                                           batch_size=batch_size,
-                                           train_sampler=train_sampler,
-                                           test_sampler=test_sampler,
-                                           transform=transform,
-                                           target_transform=target_transform,
-                                           use_cuda=use_cuda,
-                                           is_generative=is_generative,
-                                           **kwargs)
-        #self.output_size = 40
-        #self.output_size = 255
-        # self.output_size = 6
-        self.output_size = 1 if is_generative else 6
-        self.loss_type = 'sce' # fixed
-        print("derived output size = ", self.output_size)
+class _CelebALoader(AbstractLoader):
+    """Simple CelebA loader, there is no validation set."""
+
+    def __init__(self, path, batch_size, num_replicas=0,
+                 train_sampler=None, test_sampler=None, valid_sampler=None,
+                 train_transform=None, train_target_transform=None,
+                 test_transform=None, test_target_transform=None,
+                 valid_transform=None, valid_target_transform=None,
+                 cuda=True, is_sequential=False, **kwargs):
+
+        # Curry the train, test and valid dataset generators.
+        train_generator = functools.partial(CelebADataset, is_sequential=is_sequential,
+                                            path=path, split='train', download=True)
+        valid_generator = functools.partial(CelebADataset, is_sequential=is_sequential,
+                                            path=path, split='valid', download=True)
+        test_generator = functools.partial(CelebADataset, is_sequential=is_sequential,
+                                           path=path, split='test', download=True)
+
+        super(_CelebALoader, self).__init__(batch_size=batch_size,
+                                            train_dataset_generator=train_generator,
+                                            test_dataset_generator=test_generator,
+                                            valid_dataset_generator=valid_generator,
+                                            train_sampler=train_sampler,
+                                            test_sampler=test_sampler,
+                                            valid_sampler=valid_sampler,
+                                            train_transform=train_transform,
+                                            train_target_transform=train_target_transform,
+                                            test_transform=test_transform,
+                                            test_target_transform=test_target_transform,
+                                            valid_transform=valid_transform,
+                                            valid_target_transform=valid_target_transform,
+                                            num_replicas=num_replicas, cuda=cuda, **kwargs)
+        self.output_size = 40   # fixed
+        self.loss_type = 'bce'  # fixed
 
         # grab a test sample to get the size
         test_img, _ = self.train_loader.__iter__().__next__()
-        self.img_shp = list(test_img.size()[1:])
-        print("derived image shape = ", self.img_shp)
+        self.input_shape = list(test_img.size()[1:])
+        print("derived image shape = ", self.input_shape)
+
+
+class CelebALoader(_CelebALoader):
+    """Simple CelebA loader with validation set incl"""
+
+    def __init__(self, path, batch_size, num_replicas=0,
+                 train_sampler=None, test_sampler=None, valid_sampler=None,
+                 train_transform=None, train_target_transform=None,
+                 test_transform=None, test_target_transform=None,
+                 valid_transform=None, valid_target_transform=None,
+                 cuda=True, **kwargs):
+        super(CelebALoader, self).__init__(path=path, batch_size=batch_size,
+                                           train_sampler=train_sampler, test_sampler=test_sampler, valid_sampler=valid_sampler,
+                                           train_transform=train_transform, train_target_transform=train_target_transform,
+                                           test_transform=test_transform, test_target_transform=test_target_transform,
+                                           valid_transform=valid_transform, valid_target_transform=valid_transform,
+                                           num_replicas=num_replicas, cuda=cuda, is_sequential=False, **kwargs)
+
+
+class CelebASequentialLoader(_CelebALoader):
+    """Simple CelebA loader which splits dataset using features."""
+
+    def __init__(self, path, batch_size, num_replicas=0,
+                 train_sampler=None, test_sampler=None, valid_sampler=None,
+                 train_transform=None, train_target_transform=None,
+                 test_transform=None, test_target_transform=None,
+                 valid_transform=None, valid_target_transform=None,
+                 cuda=True, **kwargs):
+        super(CelebALoader, self).__init__(path=path, batch_size=batch_size,
+                                           train_sampler=train_sampler, test_sampler=test_sampler, valid_sampler=valid_sampler,
+                                           train_transform=train_transform, train_target_transform=train_target_transform,
+                                           test_transform=test_transform, test_target_transform=test_target_transform,
+                                           valid_transform=valid_transform, valid_target_transform=valid_transform,
+                                           num_replicas=num_replicas, cuda=cuda, is_sequential=True, **kwargs)

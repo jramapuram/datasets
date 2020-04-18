@@ -1,21 +1,21 @@
 import os
+import functools
 import pandas as pd
 import numpy as np
 import torch
-import numpy as np
 
 from PIL import Image
 from sklearn.preprocessing import LabelBinarizer
-from torchvision import datasets, transforms
 
+from .utils import temp_seed
 from .abstract_dataset import AbstractLoader
-from .utils import create_loader
 
 
 def _split_classes_into_list(name):
+    """This dataset provides the classes via a | in the str to signify an or for BCE."""
     classes = name.split("|")
     if len(classes) < 1:
-        return [name] # base case
+        return [name]  # base case
 
     return classes
 
@@ -27,12 +27,7 @@ def read_classes(csv_name):
     classes = [c.replace(" ", "_") for c in classes]
     classes = [_split_classes_into_list(c.lower())
                for c in classes]
-    return classes, filenames
-
-
-def find_unique_classes(class_list):
-    return list(set([item for sublist in class_list
-                     for item in sublist]))
+    return np.array(classes), filenames
 
 
 def pil_loader(path):
@@ -43,12 +38,13 @@ def pil_loader(path):
             # force convert for this dataset since
             # there are some which are RGB for some reason
             return img.convert('L')
-            #return img.convert('RGB')
+            # return img.convert('RGB')
 
 
 class NIHChestXrayDataset(torch.utils.data.Dataset):
-    def __init__(self, path, split='train', train=True, download=True,
-                 transform=None, target_transform=None, **kwargs):
+    """NIH Chest Xray dataset, assumes downloaded to a folder specified by path."""
+
+    def __init__(self, path, split='train', transform=None, target_transform=None, **kwargs):
         self.split = split
         self.path = os.path.expanduser(path)
         self.transform = transform
@@ -67,25 +63,20 @@ class NIHChestXrayDataset(torch.utils.data.Dataset):
         self.labels, self.img_names = read_classes(os.path.join(self.path, "Data_Entry_2017.csv"))
         assert len(self.img_names) == len(self.labels), "need same number of files as classes"
 
-        # unique_classes = find_unique_classes(self.labels)
-        # print("determined {} classes: {}".format(
-        #     len(unique_classes), unique_classes)
-        # )
-        # print(unique_classes)
-        # exit(0)
+        # Read the test files and not the indices to get the train files
+        test_files = pd.read_csv(os.path.join(self.path, "test_list.txt"), header=None).values
+        test_idx = np.in1d(self.img_names, test_files)
+        train_idx = np.logical_not(test_idx)
 
+        # Set the images and labels appropriately
+        if split == 'test':
+            self.img_names, self.labels = self.img_names[test_idx], self.labels[test_idx]
+            with temp_seed(1234):  # Do a fixed shuffle of the test set
+                rnd_perm = np.random.permutation(np.arange(len(self.img_names)))
+                self.img_names, self.labels = self.img_names[rnd_perm], self.labels[rnd_perm]
 
-        # determine train-test split
-        num_test = int(len(self.labels) * 0.2)
-        num_train = len(self.labels) - num_test
-        if split == 'train':
-            self.img_names, self.labels = self.img_names[0:num_train], self.labels[0:num_train]
-            # TODO: doesn't the dataloader handle this?
-            # shuffle_indices = np.arange(len(self.labels))
-            # np.random.shuffle(shuffle_indices)
-            # self.img_names, self.labels = self.img_names[shuffle_indices], self.labels[shuffle_indices]
         else:
-            self.img_names, self.labels = self.img_names[-num_test:], self.labels[-num_test:]
+            self.img_names, self.labels = self.img_names[train_idx], self.labels[train_idx]
 
         # extend the path of the each image filename
         self.img_names = [os.path.join(self.path, "images", img_name)
@@ -99,7 +90,7 @@ class NIHChestXrayDataset(torch.utils.data.Dataset):
     def __getitem__(self, index):
         img_path, target = self.img_names[index], self.labels[index]
         img = pil_loader(img_path)
-        #target = np.expand_dims(self.one_hot_label(target), 0)
+        # target = np.expand_dims(self.one_hot_label(target), 0)
         target = self.one_hot_label(target)
         if self.transform is not None:
             img = self.transform(img)
@@ -114,19 +105,34 @@ class NIHChestXrayDataset(torch.utils.data.Dataset):
 
 
 class NIHChestXrayLoader(AbstractLoader):
-    def __init__(self, path, batch_size, train_sampler=None, test_sampler=None,
-                 transform=None, target_transform=None, use_cuda=1, **kwargs):
-        super(NIHChestXrayLoader, self).__init__(NIHChestXrayDataset, path=path,
-                                                 batch_size=batch_size,
+    """Simple NIHChestXrayLoader loader, there is no validation set."""
+
+    def __init__(self, path, batch_size, num_replicas=0,
+                 train_sampler=None, test_sampler=None,
+                 train_transform=None, train_target_transform=None,
+                 test_transform=None, test_target_transform=None,
+                 cuda=True, **kwargs):
+
+        # Curry the train and test dataset generators.
+        train_generator = functools.partial(NIHChestXrayDataset, path=path, split='train')
+        test_generator = functools.partial(NIHChestXrayDataset, path=path, split='test')
+
+        super(NIHChestXrayLoader, self).__init__(batch_size=batch_size,
+                                                 train_dataset_generator=train_generator,
+                                                 test_dataset_generator=test_generator,
                                                  train_sampler=train_sampler,
                                                  test_sampler=test_sampler,
-                                                 transform=transform,
-                                                 target_transform=target_transform,
-                                                 use_cuda=use_cuda, **kwargs)
-        self.output_size = 15  # fixed
-        self.loss_type = 'bce' # fixed
+                                                 train_transform=train_transform,
+                                                 train_target_transform=train_target_transform,
+                                                 test_transform=test_transform,
+                                                 test_target_transform=test_target_transform,
+                                                 num_replicas=num_replicas, cuda=cuda, **kwargs)
+        self.output_size = 15   # fixed
+        self.loss_type = 'bce'  # fixed
 
         # grab a test sample to get the size
-        test_img, _ = self.train_loader.__iter__().__next__()
-        self.img_shp = list(test_img.size()[1:])
-        print("derived image shape = ", self.img_shp)
+        test_img, test_lbl = self.train_loader.__iter__().__next__()
+        assert test_lbl.shape[-1] == self.output_size, "label size did not match: {} vs {}".format(
+            test_lbl.shape, self.output_size)
+        self.input_shape = list(test_img.size()[1:])
+        print("derived image shape = ", self.input_shape)

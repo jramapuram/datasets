@@ -1,170 +1,36 @@
 import os
 import torch
+import functools
 import numpy as np
-import torch.utils.data as data
 
-from PIL import Image
-from copy import deepcopy
 from torchvision import transforms, datasets
 
 from .abstract_dataset import AbstractLoader
-from .utils import create_loader, temp_seed
+from .utils import temp_seed
 
 
-class OmniglotLoader(object):
-    def __init__(self, path, batch_size, train_sampler=None, test_sampler=None,
-                 transform=None, target_transform=None, use_cuda=1, **kwargs):
-        assert train_sampler is None and test_sampler is None, "omniglot loader does not support samplers"
+class OmniglotDatasetWithFixedRandomTestShuffle(datasets.Omniglot):
+    """Do a fixed random shuffle of the test set."""
 
-        # first get the datasets
-        train_dataset, test_dataset = self.get_datasets(path, transform, target_transform)
+    def __init__(self, root, background=True, transform=None, target_transform=None, download=False):
+        super(OmniglotDatasetWithFixedRandomTestShuffle, self).__init__(root=root,
+                                                                        background=background,
+                                                                        transform=transform,
+                                                                        target_transform=target_transform,
+                                                                        download=download)
 
-        # use the non-standard solution used in Kanerva machine & Beta-VAE
-        #train_dataset, test_dataset, train_sampler, test_sampler = self.get_samplers(train_dataset, test_dataset)
-        train_dataset, test_dataset = self.get_samplers(train_dataset, test_dataset)
-
-        # build the loaders
-        kwargs = {'num_workers': 4, 'pin_memory': True} if use_cuda else {}
-        self.train_loader = create_loader(train_dataset,
-                                          train_sampler,
-                                          batch_size,
-                                          shuffle=True if train_sampler is None else False,
-                                          **kwargs)
-
-        self.test_loader = create_loader(test_dataset,
-                                         test_sampler,
-                                         batch_size,
-                                         shuffle=False,
-                                         **kwargs)
-
-        # self.output_size = 964 # np.max(labels) gives this (+0)
-        # self.batch_size = batch_size
-        # self.img_shp = [1, 105, 105]
-
-        # grab a test sample to get the size
-        test_img, _ = self.train_loader.__iter__().__next__()
-        self.img_shp = list(test_img.size()[1:])
-        print("derived image shape = ", self.img_shp)
-
-        # determine number of samples
-        self.output_size = 0
-        self.determine_output_size(self.train_loader, **kwargs)
-
-        # print dataset sizes
-        print("[train]\t {} samples".format(len(train_dataset)))
-        print("[test]\t {} samples".format(len(test_dataset)))
-
-    def get_samplers(self, train_dataset, test_dataset):
-        # make the train set larger as per Wu et. al (Kanerva Machine) & Burda et. al (Beta-VAE)
-        num_train_samples = 24345
-        # num_extra_train = 24345 - 17500
-        # num_test = 11900 - num_extra_train
-
-        # create one larger dataset
-        #new_train_dataset = data.ConcatDataset([train_dataset, test_dataset])
-        new_train_dataset = train_dataset + test_dataset
-        new_test_dataset = deepcopy(new_train_dataset)
-        num_test_samples = len(new_train_dataset) - num_train_samples
-
-        # build our subset samples and return both datasets
-        train_sampler, test_sampler = None, None
-        with temp_seed(1234):
-            full_dataset_range = np.random.permutation(np.arange(num_train_samples + num_test_samples))
-            train_range = full_dataset_range[0:num_train_samples]
-            test_range = full_dataset_range[num_train_samples:]
-            assert len(train_range) == num_train_samples
-            assert len(test_range) == num_test_samples
-            # train_sampler = data.SubsetRandomSampler(train_range)
-            # test_sampler = data.SubsetRandomSampler(test_range)
-            new_train_dataset = data.Subset(new_train_dataset, train_range)
-            new_test_dataset = data.Subset(new_test_dataset, test_range)
-
-        # return new_train_dataset, new_test_dataset, train_sampler, test_sampler
-
-        return new_train_dataset, new_test_dataset
+        # For the test set we are going to do a fixed random shuffle
+        if background is False:
+            with temp_seed(1234):  # deterministic shuffle of test set
+                idx = np.random.permutation(np.arange(len(self._flat_character_images)))
+                first = np.array([i[0] for i in self._flat_character_images])[idx]
+                second = np.array([i[1] for i in self._flat_character_images])[idx].astype(np.int32)
+                self._flat_character_images = [(fi, si) for fi, si in zip(first, second)]
 
 
-    def determine_output_size(self, train_loader, **kwargs):
-        # determine output size
-        if 'output_size' not in kwargs or kwargs['output_size'] is None:
-            for _, label in self.train_loader:
-                if not isinstance(label, (float, int)) and len(label) > 1:
-                    l = np.array(label).max()
-                    if l > self.output_size:
-                        self.output_size = l
-                else:
-                    l = label.max().item()
-                    if l > self.output_size:
-                        self.output_size = l
+class BinarizedOmniglotDataset(OmniglotDatasetWithFixedRandomTestShuffle):
+    """Standard binary omniglot pytorch dataset with PIL binarization."""
 
-            self.output_size = self.output_size + 1
-        else:
-            self.output_size = kwargs['output_size']
-
-        print("determined output_size: ", self.output_size)
-
-    @staticmethod
-    def get_datasets(path, transform=None, target_transform=None):
-        if transform:
-            assert isinstance(transform, list)
-
-        transform_list = []
-        if transform:
-            transform_list.extend(transform)
-
-        # add ToTensor if it isn't there
-        transform_names = [str(tt) for tt in transform_list]
-        if 'ToTensor()' not in transform_names:
-            transform_list.append(transforms.ToTensor())
-
-        train_dataset = datasets.Omniglot(path, background=True, download=True,
-                                          transform=transforms.Compose(transform_list),
-                                          target_transform=target_transform)
-        test_dataset = datasets.Omniglot(path, background=False, download=True,
-                                         transform=transforms.Compose(transform_list),
-                                         target_transform=target_transform)
-
-        with temp_seed(1234): # deterministic shuffle of test set
-            idx = np.random.permutation(np.arange(len(test_dataset._flat_character_images)))
-            first = np.array([i[0] for i in test_dataset._flat_character_images])[idx]
-            second = np.array([i[1] for i in test_dataset._flat_character_images])[idx].astype(np.int32)
-            test_dataset._flat_character_images = [(fi, si) for fi, si in zip(first, second)]
-
-        return train_dataset, test_dataset
-
-
-class BinarizedOmniglotLoader(OmniglotLoader):
-    @staticmethod
-    def get_datasets(path, transform=None, target_transform=None):
-        if transform:
-            assert isinstance(transform, list)
-
-        transform_list = []
-        if transform:
-            transform_list.extend(transform)
-
-        # add ToTensor if it isn't there
-        transform_names = [str(tt) for tt in transform_list]
-        if 'ToTensor()' not in transform_names:
-            transform_list.append(transforms.ToTensor())
-
-        train_dataset = BinarizedOmniglotDataset(path, background=True, download=True,
-                                                 transform=transforms.Compose(transform_list),
-                                                 target_transform=target_transform)
-        test_dataset = BinarizedOmniglotDataset(path, background=False, download=True,
-                                                transform=transforms.Compose(transform_list),
-                                                target_transform=target_transform)
-
-        with temp_seed(1234): # deterministic shuffle of test set
-            idx = np.random.permutation(np.arange(len(test_dataset._flat_character_images)))
-            first = np.array([i[0] for i in test_dataset._flat_character_images])[idx]
-            second = np.array([i[1] for i in test_dataset._flat_character_images])[idx].astype(np.int32)
-            test_dataset._flat_character_images = [(fi, si) for fi, si in zip(first, second)]
-
-        return train_dataset, test_dataset
-
-
-class BinarizedOmniglotDataset(datasets.Omniglot):
     def __getitem__(self, index):
         """
         Args:
@@ -175,7 +41,7 @@ class BinarizedOmniglotDataset(datasets.Omniglot):
         """
         image, character_class = super(BinarizedOmniglotDataset, self).__getitem__(index)
 
-        # XXX: workaround to go back to B/W for grayscale
+        # workaround to go back to B/W for grayscale
         image = transforms.ToTensor()(transforms.ToPILImage()(image).convert('1'))
         # image[image > 0.2] = 1.0 # XXX: workaround to upsample / downsample
 
@@ -183,15 +49,12 @@ class BinarizedOmniglotDataset(datasets.Omniglot):
 
 
 class BinarizedOmniglotBurdaDataset(torch.utils.data.Dataset):
-    def __init__(self, path, split='train', train=True, download=True,
+    def __init__(self, path, split='train', download=True,
                  transform=None, target_transform=None, **kwargs):
         self.split = split
         self.path = os.path.expanduser(path)
         self.transform = transform
         self.target_transform = target_transform
-
-        # hard-coded
-        self.output_size = 0
 
         # load the images-paths and labels
         self.train_dataset, self.test_dataset = self.read_dataset(path)
@@ -207,6 +70,7 @@ class BinarizedOmniglotBurdaDataset(torch.utils.data.Dataset):
         print("[{}] {} samples".format(split, len(self.imgs)))
 
     def read_dataset(self, path):
+        """Helper to read the matlab files."""
         import scipy.io as sio
         data_file = os.path.join(path, 'chardata.mat')
         if not os.path.isfile(data_file):
@@ -216,7 +80,7 @@ class BinarizedOmniglotBurdaDataset(torch.utils.data.Dataset):
             open(os.path.join(path, 'chardata.mat'), 'wb').write(requests.get(dataset_url, allow_redirects=True).content)
 
         def reshape_data(data):
-            return data.reshape((-1, 1, 28, 28))#.reshape((-1, 28*28), order='fortran')
+            return data.reshape((-1, 1, 28, 28))  # .reshape((-1, 28*28), order='fortran')
 
         # read full dataset and return the train and test data
         omni_raw = sio.loadmat(data_file)
@@ -226,14 +90,11 @@ class BinarizedOmniglotBurdaDataset(torch.utils.data.Dataset):
 
     def __getitem__(self, index):
         img = self.imgs[index]
+        img = transforms.ToPILImage()(torch.from_numpy(img))
 
         # handle transforms if requested
-        if self.transform is not None and len(self.transform.transforms) > 1:
-            img = transforms.ToTensor()(
-                self.transform(transforms.ToPILImage()(torch.from_numpy(img))))
-        else:
-            if not isinstance(img, torch.Tensor):
-                img = torch.from_numpy(img)
+        if self.transform is not None:
+            img = self.transform(img)
 
         target = 0
         if self.target_transform is not None:
@@ -245,36 +106,99 @@ class BinarizedOmniglotBurdaDataset(torch.utils.data.Dataset):
         return len(self.imgs)
 
 
-class EmptyToTensor(object):
-    ''' hack of ToTensor: since it is checked in superclass '''
-    def __repr__(self):
-        return 'ToTensor()'
+class OmniglotLoader(AbstractLoader):
+    """Simple Omniglor loader using pytorch loader, there is no validation set."""
 
-    def __call__(self, x):
-        return x
+    def __init__(self, path, batch_size, num_replicas=0,
+                 train_sampler=None, test_sampler=None,
+                 train_transform=None, train_target_transform=None,
+                 test_transform=None, test_target_transform=None,
+                 cuda=True, **kwargs):
+        # Curry the train and test dataset generators.
+        train_generator = functools.partial(OmniglotDatasetWithFixedRandomTestShuffle,
+                                            root=path, background=True, download=True)
+        test_generator = functools.partial(OmniglotDatasetWithFixedRandomTestShuffle,
+                                           root=path, background=False, download=True)
 
-
-class BinarizedOmniglotBurdaLoader(AbstractLoader):
-    def __init__(self, path, batch_size, train_sampler=None, test_sampler=None,
-                 transform=None, target_transform=None, use_cuda=1, **kwargs):
-        if isinstance(transform, list): # hack to do ToTensor()
-            transform.extend([EmptyToTensor()])
-        else:
-            transform = [EmptyToTensor()]
-
-        # use the abstract class to build the loader
-        super(BinarizedOmniglotBurdaLoader, self).__init__(BinarizedOmniglotBurdaDataset, path=path,
-                                                           batch_size=batch_size,
-                                                           train_sampler=train_sampler,
-                                                           test_sampler=test_sampler,
-                                                           transform=transform,
-                                                           target_transform=target_transform,
-                                                           use_cuda=use_cuda, **kwargs)
-        self.output_size = 0    # burda has no labels
-        self.loss_type = 'none' # fixed
-        print("derived output size = ", self.output_size)
+        super(OmniglotLoader, self).__init__(batch_size=batch_size,
+                                             train_dataset_generator=train_generator,
+                                             test_dataset_generator=test_generator,
+                                             train_sampler=train_sampler,
+                                             test_sampler=test_sampler,
+                                             train_transform=train_transform,
+                                             train_target_transform=train_target_transform,
+                                             test_transform=test_transform,
+                                             test_target_transform=test_target_transform,
+                                             num_replicas=num_replicas, cuda=cuda, **kwargs)
+        self.output_size = 1623  # fixed
+        self.loss_type = 'ce'    # fixed
 
         # grab a test sample to get the size
         test_img, _ = self.train_loader.__iter__().__next__()
-        self.img_shp = list(test_img.size()[1:])
-        print("derived image shape = ", self.img_shp)
+        self.input_shape = list(test_img.size()[1:])
+        print("derived image shape = ", self.input_shape)
+
+
+class BinarizedOmniglotLoader(AbstractLoader):
+    """Binarized omniglot loader using pytorch omniglot w/ PIL binarization; no validation set."""
+
+    def __init__(self, path, batch_size, num_replicas=0,
+                 train_sampler=None, test_sampler=None,
+                 train_transform=None, train_target_transform=None,
+                 test_transform=None, test_target_transform=None,
+                 cuda=True, **kwargs):
+        # Curry the train and test dataset generators.
+        train_generator = functools.partial(BinarizedOmniglotDataset, root=path, background=True, download=True)
+        test_generator = functools.partial(BinarizedOmniglotDataset, root=path, background=False, download=True)
+
+        super(BinarizedOmniglotLoader, self).__init__(batch_size=batch_size,
+                                                      train_dataset_generator=train_generator,
+                                                      test_dataset_generator=test_generator,
+                                                      train_sampler=train_sampler,
+                                                      test_sampler=test_sampler,
+                                                      train_transform=train_transform,
+                                                      train_target_transform=train_target_transform,
+                                                      test_transform=test_transform,
+                                                      test_target_transform=test_target_transform,
+                                                      num_replicas=num_replicas, cuda=cuda, **kwargs)
+        self.output_size = 1623  # fixed
+        self.loss_type = 'ce'    # fixed
+
+        # grab a test sample to get the size
+        test_img, _ = self.train_loader.__iter__().__next__()
+        self.input_shape = list(test_img.size()[1:])
+        print("derived image shape = ", self.input_shape)
+
+
+class BinarizedOmniglotBurdaLoader(AbstractLoader):
+    """Simple BinarizedMNIST-Burda loader, there is no validation set."""
+
+    def __init__(self, path, batch_size, num_replicas=0,
+                 train_sampler=None, test_sampler=None,
+                 train_transform=None, train_target_transform=None,
+                 test_transform=None, test_target_transform=None,
+                 cuda=True, **kwargs):
+
+        assert train_target_transform is None and test_target_transform is None, "No labels for Burda-Omniglot."
+
+        # Curry the train and test dataset generators.
+        train_generator = functools.partial(BinarizedOmniglotBurdaDataset, path=path, split='train', download=True)
+        test_generator = functools.partial(BinarizedOmniglotBurdaDataset, path=path, split='test', download=True)
+
+        super(BinarizedOmniglotBurdaLoader, self).__init__(batch_size=batch_size,
+                                                           train_dataset_generator=train_generator,
+                                                           test_dataset_generator=test_generator,
+                                                           train_sampler=train_sampler,
+                                                           test_sampler=test_sampler,
+                                                           train_transform=train_transform,
+                                                           train_target_transform=train_target_transform,
+                                                           test_transform=test_transform,
+                                                           test_target_transform=test_target_transform,
+                                                           num_replicas=num_replicas, cuda=cuda, **kwargs)
+        self.output_size = 0   # fixed (Burda version has no labels)
+        self.loss_type = 'ce'  # fixed
+
+        # grab a test sample to get the size
+        test_img, _ = self.train_loader.__iter__().__next__()
+        self.input_shape = list(test_img.size()[1:])
+        print("derived image shape = ", self.input_shape)

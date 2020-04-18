@@ -7,6 +7,7 @@ from multiprocessing import Process, Queue
 from .symbol_drawing import draw_symbol
 from random import shuffle as non_np_shuffle
 
+
 def save_batch_as_png(batch, labels, dir_path_with_slash, add_label=True):
     """save a whole batch as separate png files with the label in the filename"""
     for i in range(len(batch)):
@@ -248,6 +249,7 @@ class SampleSpec:
             self.generators = GenProccesses(self, num_processes=num_processes)
 
         return self.generators(batch_size)
+
 
 def run():
     import argparse

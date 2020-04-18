@@ -1,23 +1,14 @@
 import os
-import warnings
-import gc
-import torch
+import functools
 import numpy as np
-import torchvision.transforms.functional as F
-
 import random
-random.seed(1234) # fix the seed for shuffling
 
-from tqdm import tqdm
 from PIL import Image
-from copy import deepcopy
 from torchvision import datasets, transforms
-from torch.utils.data.dataloader import default_collate
-from contextlib import contextmanager
-from joblib import Parallel, delayed
-#from loky import get_reusable_executor
 
-from .utils import create_loader
+from .utils import temp_seed
+from .abstract_dataset import AbstractLoader
+
 
 try:
     import pyvips
@@ -32,7 +23,8 @@ except:
 
 
 def pil_loader(path):
-    # open path as file to avoid ResourceWarning (https://github.com/python-pillow/Pillow/issues/835)
+    # open path as file to avoid ResourceWarning
+    # https://github.com/python-pillow/Pillow/issues/835
     with open(path, 'rb') as f:
         with Image.open(f) as img:
             img_mode = img.mode
@@ -46,13 +38,14 @@ def vips_loader(path):
     img = pyvips.Image.new_from_file(path, access='sequential')
     height, width = img.height, img.width
     img_np = np.array(img.write_to_memory()).reshape(height, width, -1)
-    del img # mitigate tentative memory leak in pyvips
-    return img_np
+    del img  # mitigate tentative memory leak in pyvips
+    return np.transpose(img_np, (2, 0, 1))
 
 
 class MultiImageFolder(datasets.ImageFolder):
     """Inherits from Imagefolder, but returns an multiple images (and ONLY one class label) """
-    def __init__(self, roots, transform=None, target_transform=None, **kwargs):
+
+    def __init__(self, roots, transform=None, aux_transform=None, target_transform=None):
         assert isinstance(roots, list), "multi-imagefolder needs a list of roots"
         loader = vips_loader if USE_PYVIPS is True else pil_loader
         super(MultiImageFolder, self).__init__(roots[0],
@@ -61,11 +54,12 @@ class MultiImageFolder(datasets.ImageFolder):
                                                loader=loader)
         self.num_roots = len(roots)
         self.num_extra_roots = self.num_roots - 1
-        self.aux_transform = None if 'aux_transform' not in kwargs else kwargs['aux_transform']
+        self.aux_transform = aux_transform
 
         # sort the images otherwise we will always read a folder at a time
         # this is problematic for the test-loader which generally doesnt shuffle!
-        random.shuffle(self.imgs)
+        with temp_seed(1234):
+            random.shuffle(self.imgs)
 
         # determine the extension replacements
         # eg: original is .png, other is .tiff for pyramid tiff, etc, etc
@@ -79,9 +73,8 @@ class MultiImageFolder(datasets.ImageFolder):
             for i, new_root in enumerate(roots[1:]):
                 refactored_path = path.replace(roots[0], new_root)
                 determined_full_path = None
+
                 for ext_i in possible_exts:
-                    target_without_ext = os.path.splitext(refactored_path)[0]
-                    #full_path = os.path.join(refactored_path, target_without_ext + ext_i)
                     full_path = refactored_path.replace(orig_extension, ext_i)
                     if os.path.isfile(full_path):
                         determined_full_path = full_path
@@ -125,89 +118,60 @@ class MultiImageFolder(datasets.ImageFolder):
         return [img] + other_imgs, target
 
 
-class MultiImageFolderLoader(object):
-    def __init__(self, path, batch_size, train_sampler=None, test_sampler=None,
-                 transform=None, target_transform=None, use_cuda=1, **kwargs):
-        ''' assumes that the '''
-        warnings.warn("multi-imagefolder uses all CPU cores which aids feeding")
-        # first get the datasets
-        train_dataset, test_dataset = self.get_datasets(path, transform,
-                                                        target_transform,
-                                                        **kwargs)
+class MultiImageFolderLoader(AbstractLoader):
+    """Loads data from train_*, test_* and valid_* folders simultaneously."""
 
-        # build the loaders
-        kwargs_loader = {'num_workers': os.cpu_count(), 'pin_memory': False} if use_cuda else {}
-        self.train_loader = create_loader(train_dataset,
-                                          train_sampler,
-                                          batch_size,
-                                          shuffle=True if train_sampler is None else False,
-                                          **kwargs_loader)
+    def __init__(self, path, batch_size, num_replicas=0,
+                 train_sampler=None, test_sampler=None, valid_sampler=None,
+                 train_transform=None, train_target_transform=None,
+                 test_transform=None, test_target_transform=None,
+                 valid_transform=None, valid_target_transform=None,
+                 cuda=True, output_size=None, **kwargs):
+        # output_size=None uses automagic
 
-        self.test_loader = create_loader(test_dataset,
-                                         test_sampler,
-                                         batch_size,
-                                         shuffle=False,
-                                         **kwargs_loader)
-        self.batch_size = batch_size
-        self.output_size = 0
-
-        # just one image to get the image sizing
-        test_imgs, _ = self.train_loader.__iter__().__next__()
-        self.img_shp = list(test_imgs[0].size()[1:])
-        print("determined img_size: ", self.img_shp)
-        self.aux_imgs_shp = [list(ti.size()[1:]) for ti in test_imgs[1:]]
-        print("determined aux img_sizes: ", self.aux_imgs_shp)
-
-        # iterate over the entire dataset to find the max label
-        if 'output_size' not in kwargs or kwargs['output_size'] is None:
-            warning_str = "trying to determine output_size..."  \
-                          "consider passing this in kwargs to make " \
-                          "this quicker for large imgs."\
-                          .replace("\n", "").replace("\t", "")
-            warnings.warn(warning_str)
-
-            for _, label in tqdm(self.train_loader):
-                if not isinstance(label, (float, int)) and len(label) > 1:
-                    l = np.array(label).max()
-                    if l > self.output_size:
-                        self.output_size = l
-                else:
-                    l = label.max().item()
-                    if l > self.output_size:
-                        self.output_size = l
-
-            self.output_size = self.output_size + 1
-        else:
-            self.output_size = kwargs['output_size']
-
-        print("determined output_size: ", self.output_size)
-        assert self.output_size > 0
-
-    @staticmethod
-    def get_datasets(path, transform=None, target_transform=None, **kwargs):
-        if transform:
-            assert isinstance(transform, list)
-
-        transform_list = []
-        if transform:
-            transform_list.extend(transform)
-
-        transform_list.append(transforms.ToTensor())
-
-        # train roots are everything with train_ , test roots are everything with test_
+        # Calculate the roots based on the path
         all_dirs = sorted([os.path.join(path, o) for o in os.listdir(path)
-                           if os.path.isdir(os.path.join(path,o))])
+                           if os.path.isdir(os.path.join(path, o))])
         train_roots = [t for t in all_dirs if 'train' in t]
         test_roots = [te for te in all_dirs if 'test' in te]
+        valid_roots = [va for va in all_dirs if 'valid' in va]
         print("train_roots = ", train_roots)
         print("test_roots = ", test_roots)
+        print("valid_roots = ", valid_roots)
         assert len(train_roots) == len(test_roots), "number of train sets needs to match test sets"
         assert len(train_roots) > 0, "no datasets detected!"
 
-        train_dataset = MultiImageFolder(roots=train_roots,
-                                         transform=transforms.Compose(transform_list),
-                                         target_transform=target_transform, **kwargs)
-        test_dataset = MultiImageFolder(roots=test_roots,
-                                        transform=transforms.Compose(transform_list),
-                                        target_transform=target_transform, **kwargs)
-        return train_dataset, test_dataset
+        # Use the same train_transform for aux_transform
+        aux_transform = self.compose_transforms(train_transform)
+
+        # Curry the train and test dataset generators.
+        train_generator = functools.partial(MultiImageFolder, aux_transform=aux_transform, roots=train_roots)
+        test_generator = functools.partial(MultiImageFolder, roots=test_roots)
+        valid_generator = None
+        if len(valid_roots) > 0:
+            valid_generator = functools.partial(MultiImageFolder,
+                                                aux_transform=aux_transform,
+                                                roots=valid_roots)
+
+        super(MultiImageFolderLoader, self).__init__(batch_size=batch_size,
+                                                     train_dataset_generator=train_generator,
+                                                     test_dataset_generator=test_generator,
+                                                     valid_dataset_generator=valid_generator,
+                                                     train_sampler=train_sampler,
+                                                     test_sampler=test_sampler,
+                                                     valid_sampler=valid_sampler,
+                                                     train_transform=train_transform,
+                                                     train_target_transform=train_target_transform,
+                                                     test_transform=test_transform,
+                                                     test_target_transform=test_target_transform,
+                                                     num_replicas=num_replicas, cuda=cuda, **kwargs)
+        self.output_size = output_size if output_size is not None\
+            else self.determine_output_size()            # automagic
+        self.loss_type = 'ce'                            # fixed
+
+        # grab a test sample to get the size
+        test_imgs, _ = self.train_loader.__iter__().__next__()
+        self.input_shape = list(test_imgs[0].size()[1:])
+        print("derived image shape = ", self.input_shape)
+        self.aux_input_shape = [list(ti.size()[1:]) for ti in test_imgs[1:]]
+        print("determined aux img_sizes: ", self.aux_input_shape)

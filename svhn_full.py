@@ -1,5 +1,5 @@
 from __future__ import print_function
-import torch
+
 import os
 import os.path
 import numpy as np
@@ -125,7 +125,6 @@ class SVHNFull(data.Dataset):
         return np.asarray(reduced_oh, dtype=np.int32)
 
     def create_dataset(self, data, path):
-        import h5py
         import pandas as pd
         from tqdm import tqdm
 
@@ -154,14 +153,17 @@ class SVHNFull(data.Dataset):
 
         df = pd.DataFrame(df)
         for i in range(1, 6):
-            df.set_value(df[df['num%d'%i] == 10].index, 'num%d'%i, 0)
+            # df.set_value(df[df['num%d' % i] == 10].index, 'num%d' % i, 0)
+            df.at[df[df['num%d' % i] == 10].index, 'num%d' % i] = 0
 
         for i in range(1, 6):
-            df.set_value(df['num%d'%i].isnull(), 'num%d'%i, 10)
+            # df.set_value(df['num%d' % i].isnull(), 'num%d' % i, 10)
+            df.at[df['num%d' % i].isnull(), 'num%d' % i] =  10
 
         for i in range(1, 6):
-            for j in df['bbox%d'%i][df['bbox%d'%i].isnull()].index:
-                df.set_value(j, 'bbox%d'%(i+1), (0, 0, 0, 0))
+            for j in df['bbox%d' % i][df['bbox%d' % i].isnull()].index:
+                # df.set_value(j, 'bbox%d' % (i+1), (0, 0, 0, 0))
+                df.at[j, 'bbox%d' % (i+1)] = (0, 0, 0, 0)
 
         df = df.dropna()
         df = df.reset_index(drop=True)

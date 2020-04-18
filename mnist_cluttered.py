@@ -1,23 +1,21 @@
 import os
-import cv2
-cv2.setNumThreads(0)
-
+import functools
 import torch
 import numpy as np
 
 from PIL import Image
-from torchvision import datasets, transforms
 
-from .utils import create_loader, normalize_train_test_images
+from .abstract_dataset import AbstractLoader
 
 
 def load_cluttered_mnist(path, segment='train'):
+    """Load the required npz file and return images + labels."""
     loaded = np.load(os.path.join(path, "{}.npz".format(segment)))
     return [loaded['data'], loaded['labels']]
 
 
 class ClutteredMNISTDataset(torch.utils.data.Dataset):
-    def __init__(self, path, segment='train', transform=None, target_transform=None, **kwargs):
+    def __init__(self, path, segment='train', transform=None, target_transform=None):
 
         self.path = os.path.expanduser(path)
         self.transform = transform
@@ -28,95 +26,54 @@ class ClutteredMNISTDataset(torch.utils.data.Dataset):
         self.imgs, self.labels = self._load_from_path()
 
     def _load_from_path(self):
-        # load the tensor dataset from it's t7 binaries
-        imgs, labels =  load_cluttered_mnist(self.path, segment=self.segment)
-        print("imgs_%s = "%self.segment, imgs.shape,
-              " | lbl_%s = "%self.segment, labels.shape)
+        # load the tensor dataset from npz
+        imgs, labels = load_cluttered_mnist(self.path, segment=self.segment)
+        print("imgs_{} = {} | lbl_{} = {} ".format(self.segment, imgs.shape,
+                                                   self.segment, labels.shape))
         return imgs, labels
 
     def __getitem__(self, index):
         img, target = self.imgs[index], self.labels[index]
         img = Image.fromarray(np.uint8(img.squeeze()*255))
-        #img = np.transpose(img, (1, 2, 0))
+
         if self.transform is not None:
             img = self.transform(img)
 
         if self.target_transform is not None:
             target = self.target_transform(target)
 
-        #img = np.transpose(img, (1, 2, 0))
-        #img = Image.fromarray(np.uint8(img*255))
         return img, target
 
     def __len__(self):
         return len(self.imgs)
 
 
-class ClutteredMNISTLoader(object):
+class ClutteredMNISTLoader(AbstractLoader):
+    """Simple ClutteredMNIST loader, there is no validation set."""
+
     def __init__(self, path, batch_size, train_sampler=None, test_sampler=None,
-                 transform=None, target_transform=None, use_cuda=1, **kwargs):
-        # first get the datasets
-        train_dataset, test_dataset = self.get_datasets(path, transform,
-                                                        target_transform,
-                                                        **kwargs)
+                 train_transform=None, train_target_transform=None,
+                 test_transform=None, test_target_transform=None,
+                 num_replicas=0, cuda=True, **kwargs):
 
-        # normalize the images
-        # train_dataset.imgs, test_dataset.imgs = normalize_train_test_images(
-        #     train_dataset.imgs, test_dataset.imgs
-        # )
+        # Curry the train and test dataset generators.
+        train_generator = functools.partial(ClutteredMNISTDataset, path=path, segment='train')
+        test_generator = functools.partial(ClutteredMNISTDataset, path=path, segment='test')
 
-        # build the loaders
-        kwargs = {'num_workers': 8, 'pin_memory': True} if use_cuda else {}
-        self.train_loader = create_loader(train_dataset,
-                                          train_sampler,
-                                          batch_size,
-                                          shuffle=True if train_sampler is None else False,
-                                          **kwargs)
+        super(ClutteredMNISTLoader, self).__init__(batch_size=batch_size,
+                                                   train_dataset_generator=train_generator,
+                                                   test_dataset_generator=test_generator,
+                                                   train_sampler=train_sampler,
+                                                   test_sampler=test_sampler,
+                                                   train_transform=train_transform,
+                                                   train_target_transform=train_target_transform,
+                                                   test_transform=test_transform,
+                                                   test_target_transform=test_target_transform,
+                                                   num_replicas=num_replicas, cuda=cuda, **kwargs)
+        self.output_size = self.determine_output_size()
+        self.loss_type = 'ce'  # fixed
 
-        self.test_loader = create_loader(test_dataset,
-                                         test_sampler,
-                                         batch_size,
-                                         shuffle=False,
-                                         **kwargs)
-        self.output_size = 0
-        self.batch_size = batch_size
-
-        # determine output size
-        if 'output_size' not in kwargs or kwargs['output_size'] is None:
-            for _, label in self.train_loader:
-                if not isinstance(label, (float, int)) and len(label) > 1:
-                    l = np.array(label).max()
-                    if l > self.output_size:
-                        self.output_size = l
-                else:
-                    l = label.max().item()
-                    if l > self.output_size:
-                        self.output_size = l
-
-            self.output_size = self.output_size + 1
-        else:
-            self.output_size = kwargs['output_size']
-
-        print("determined output_size: ", self.output_size)
-        self.img_shp = [1, 100, 100]
-
-    @staticmethod
-    def get_datasets(path, transform=None, target_transform=None, **kwargs):
-        if transform:
-            assert isinstance(transform, list)
-
-        transform_list = []
-        if transform:
-            transform_list.extend(transform)
-
-        transform_names = [str(tt) for tt in transform_list]
-        if 'ToTensor()' not in transform_names:
-            transform_list.append(transforms.ToTensor())
-
-        train_dataset = ClutteredMNISTDataset(path, segment='train',
-                                              transform=transforms.Compose(transform_list),
-                                              target_transform=target_transform, **kwargs)
-        test_dataset = ClutteredMNISTDataset(path, segment='test',
-                                             transform=transforms.Compose(transform_list),
-                                             target_transform=target_transform, **kwargs)
-        return train_dataset, test_dataset
+        # grab a test sample to get the size
+        test_img, _ = self.train_loader.__iter__().__next__()
+        self.input_shape = list(test_img.size()[1:])
+        print("derived image shape = ", self.input_shape)
