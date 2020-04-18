@@ -131,8 +131,9 @@ def read_filenames_and_labels(path, split='train'):
 class CelebADataset(torch.utils.data.Dataset):
     def __init__(self, path, split='train',  download=True,
                  transform=None, target_transform=None,
-                 is_sequential=False, **kwargs):
+                 is_sequential=False, dataset_to_memory=False, **kwargs):
         self.split = split
+        self.is_in_memory = False
         self.path = os.path.join(os.path.expanduser(path), "img_align_celeba")
         self.transform = transform
         self.loader = pil_loader
@@ -145,12 +146,49 @@ class CelebADataset(torch.utils.data.Dataset):
                            os.path.join(path, 'list_eval_partition.txt'))
             _download_file('https://s3-us-west-1.amazonaws.com/audacity-dlnfd/datasets/celeba.zip', os.path.join(path, 'celeba.zip'))
 
-        # read the labels
+        # read the labels and filenames
         self.img_names, self.labels = read_sequential_dataset(path, split=split) if is_sequential \
             else read_filenames_and_labels(path, split=split)
         print("[{}] {} samples".format(split, len(self.labels)))
 
+        # Load into memory if requested
+        if dataset_to_memory:
+            self.to_memory()
+
+    def to_memory(self):
+        if self.is_in_memory is False:
+            print("Loading CelebA images into memory...", end=' ', flush=True)
+            self.imgs = [self.loader(os.path.join(self.path, img_filename))
+                         for img_filename in self.img_names]
+            # NOTE: this is probably not what you want due to rng augmentations
+            # if self.transform is not None:
+            #     self.imgs = [self.transform(img) for img in self.imgs]
+
+            self.is_in_memory = True
+            print("completed!")
+
     def __getitem__(self, index):
+        """Returns the online or in-memory getter."""
+        if self.is_in_memory:
+            return self._getitem_memory(index)
+
+        return self._getitem_online(index)
+
+    def _getitem_memory(self, index):
+        """Simply returns transformed loaded image."""
+        target = self.labels[index]
+        img = self.imgs[index]
+
+        if self.transform is not None:
+            img = self.transform(img)
+
+        if self.target_transform is not None:
+            target = self.target_transform(target)
+
+        return img, target
+
+    def _getitem_online(self, index):
+        """Normal getter: reads images via threads."""
         target = self.labels[index]
         img = self.loader(os.path.join(self.path, self.img_names[index]))
 

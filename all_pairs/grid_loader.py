@@ -21,7 +21,7 @@ def set_sample_spec(num_pairs, num_classes, reset_every=None, im_dim=76):
 
 
 def numpy_to_PIL(img):
-    print("img_max = ", img.max(), " | min = ", img.min(), img.squeeze().shape)
+    """Simple helper to converty a numpy image to PIL for transform operations."""
     return Image.fromarray(np.uint8(img.squeeze()*255))
 
 
@@ -37,6 +37,14 @@ class ToTensor(object):
         return result
 
 
+class LenImplementor(object):
+    def __init__(self, length):
+        self.length = length
+
+    def __len__(self):
+        return self.length
+
+
 class OnlineGridGenerator(Dataset):
     def __init__(self, batch_size, batches_per_epoch,
                  transform=None,
@@ -48,13 +56,6 @@ class OnlineGridGenerator(Dataset):
         self.target_transform = target_transform
 
         # lots of other code does len(dataloader.dataset) to get size,
-        class LenImplementor(object):
-            def __init__(self, length):
-                self.length = length
-
-            def __len__(self):
-                return self.length
-
         self.dataset = LenImplementor(batches_per_epoch * batch_size)
 
     def __len__(self):
@@ -134,9 +135,12 @@ class GridDataLoader(AbstractLoader):
                  cuda=True, batches_per_epoch=500, test_frac=0.2, **kwargs):
 
         # Curry the train and test dataset generators.
-        train_generator = functools.partial(OnlineGridGenerator, batch_size=batch_size, batches_per_epoch=batches_per_epoch)
-        test_generator = functools.partial(FixedGridGenerator, total_samples=int(batches_per_epoch * batch_size * test_frac))
+        train_generator = functools.partial(
+            OnlineGridGenerator, batch_size=batch_size, batches_per_epoch=batches_per_epoch)
+        test_generator = functools.partial(
+            FixedGridGenerator, total_samples=int(batches_per_epoch * batch_size * test_frac))
 
+        # kwargs['num_workers'] = 0  # Over-ride this for the loaders
         super(GridDataLoader, self).__init__(batch_size=batch_size,
                                              train_dataset_generator=train_generator,
                                              test_dataset_generator=test_generator,
@@ -146,7 +150,6 @@ class GridDataLoader(AbstractLoader):
                                              train_target_transform=train_target_transform,
                                              test_transform=test_transform,
                                              test_target_transform=test_target_transform,
-                                             num_workers=1, pin_memory=True,
                                              num_replicas=num_replicas, cuda=cuda, **kwargs)
         self.output_size = 2   # fixed
         self.loss_type = 'ce'  # fixed

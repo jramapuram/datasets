@@ -4,6 +4,7 @@ import numpy as np
 from torchvision import transforms
 
 from .utils import create_loader
+from .samplers import GeneralDistributedSampler
 
 
 def get_worker_init_fn(seed=42, same_seed_workers=False):
@@ -69,6 +70,11 @@ class AbstractLoader(object):
         :rtype: object
 
         """
+        self.train_sampler = train_sampler    # Keep the samplers as members for set_epoch
+        self.test_sampler = test_sampler
+        self.valid_sampler = valid_sampler
+        self.is_distributed = num_replicas > 1
+
         # Get the raw torch datasets
         train_dataset = self.get_dataset(train_dataset_generator,
                                          train_transform,
@@ -86,33 +92,43 @@ class AbstractLoader(object):
         worker_init_fn = get_worker_init_fn(seed=seed, same_seed_workers=same_seed_workers) \
             if num_replicas > 0 else None
 
+        # Build the distributed data samplers
+        if self.is_distributed:
+            assert train_sampler is None, "Can't use a custom train sampler with distributed-multiprocess."
+            self.train_sampler = GeneralDistributedSampler(train_dataset)
+            # assert test_sampler is None, "Can't use a custom test sampler with distributed-multiprocess."
+            # self.test_sampler = GeneralDistributedSampler(train_dataset, shuffle=False, pad=False)  # don't pad test
+            if valid_dataset:
+                assert valid_sampler is None, "Can't use a custom valid sampler with distributed-multiprocess."
+                self.valid_sampler = GeneralDistributedSampler(valid_dataset)
+
         # Wrap the dataset with a loader with the (common) args below
         loader_kwargs = {'num_workers': workers_per_replica,
                          'pin_memory': pin_memory & cuda,
                          'worker_init_fn': worker_init_fn,
                          'timeout': timeout,
                          'drop_last': drop_last}
-        self.train_loader = create_loader(train_dataset,
-                                          train_sampler,
-                                          batch_size,
-                                          shuffle=True if train_sampler is None else False,
+        self.train_loader = create_loader(dataset=train_dataset,
+                                          sampler=self.train_sampler,
+                                          batch_size=batch_size,
+                                          shuffle=True if self.train_sampler is None else False,
                                           **loader_kwargs)
         assert len(self.train_loader.dataset) >= batch_size, "train-set has {} samples but {} requested.".format(
             len(self.train_loader.dataset), batch_size)
 
-        self.test_loader = create_loader(test_dataset,
-                                         test_sampler,
-                                         batch_size,
+        self.test_loader = create_loader(dataset=test_dataset,
+                                         sampler=self.test_sampler,
+                                         batch_size=batch_size,
                                          shuffle=False,
                                          **loader_kwargs)
         assert len(self.test_loader.dataset) >= batch_size, "test-set has {} samples but {} requested.".format(
             len(self.test_loader.dataset), batch_size)
 
         if valid_dataset is not None:
-            self.valid_loader = create_loader(valid_dataset,
-                                              valid_sampler,
-                                              batch_size,
-                                              shuffle=True,  # TODO: what here?
+            self.valid_loader = create_loader(dataset=valid_dataset,
+                                              sampler=self.valid_sampler,
+                                              batch_size=batch_size,
+                                              shuffle=True if self.train_sampler is None else False,
                                               **loader_kwargs)
             assert len(self.valid_loader.dataset) >= batch_size, "valid-set has {} samples but {} requested.".format(
                 len(self.valid_loader.dataset), batch_size)
@@ -122,6 +138,27 @@ class AbstractLoader(object):
         self.input_shape = None
         self.output_size = 0
         self.batch_size = batch_size
+
+    def set_epoch(self, epoch, split):
+        """Sets the epoch for fixed RNG shuffling for distributed multi-processing.
+
+        :param epoch: the current epoch
+        :param split: train test or valid
+        :returns: nothing, but sets the sampler epoch internally
+        :rtype: None
+
+        """
+        if self.is_distributed:  # Only distributed settings require setting the epoch
+            split_map = {'train': self.train_sampler, 'test': self.test_sampler, 'valid': self.valid_sampler}
+            split_map[split].set_epoch(epoch)
+
+    def set_all_epochs(self, epoch):
+        """Syntactic sugar to set all loader epochs."""
+        if self.is_distributed:  # Only distributed settings require setting the epoch
+            # splits = ['train', 'test', 'valid'] if self.valid_loader is not None else ['train', 'test']
+            splits = ['train', 'valid'] if self.valid_loader is not None else ['train']
+            for s in splits:
+                self.set_epoch(epoch=epoch, split=s)
 
     def determine_output_size(self):
         """Iterate dataset to find the maximum output size."""
