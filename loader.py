@@ -1,7 +1,6 @@
 import os
 import numpy as np
 
-from datasets.crop_dual_imagefolder import CropDualImageFolderLoader
 from datasets.all_pairs.grid_loader import GridDataLoader
 from datasets.samplers import ClassSampler
 from datasets.cifar import CIFAR10Loader, CIFAR100Loader
@@ -28,7 +27,6 @@ loader_map = {
     'sort': SortLoader,
     'nih_chest_xray': NIHChestXrayLoader,
     'starcraft_predict_battle': StarcraftPredictBattleLoader,
-    'crop_dual_imagefolder': CropDualImageFolderLoader,
     'mnist': MNISTLoader,
     'binarized_mnist': BinarizedMNISTLoader,
     'binarized_omniglot': BinarizedOmniglotLoader,
@@ -140,6 +138,10 @@ def get_loader(task: str, data_dir: str, batch_size: int, cuda: bool,
         assert task in loader_map, "unknown task requested"
         if task == 'permuted':
             kwargs['seed'] = PERMUTE_SEED
+        elif task == 'crop_dual_imagefolder':
+            # Lazy load this because of PYVIPS issues.
+            from datasets.crop_dual_imagefolder import CropDualImageFolderLoader
+            loader_map['crop_dual_imagefolder'] = CropDualImageFolderLoader
 
         return loader_map[task](path=data_dir,
                                 batch_size=batch_size,

@@ -96,6 +96,7 @@ class AbstractLoader(object):
         if self.is_distributed:
             assert train_sampler is None, "Can't use a custom train sampler with distributed-multiprocess."
             self.train_sampler = GeneralDistributedSampler(train_dataset)
+            # TODO(jramapuram): setup logic for distributed testing
             # assert test_sampler is None, "Can't use a custom test sampler with distributed-multiprocess."
             # self.test_sampler = GeneralDistributedSampler(train_dataset, shuffle=False, pad=False)  # don't pad test
             if valid_dataset:
@@ -113,7 +114,7 @@ class AbstractLoader(object):
                                           batch_size=batch_size,
                                           shuffle=True if self.train_sampler is None else False,
                                           **loader_kwargs)
-        assert len(self.train_loader.dataset) >= batch_size, "train-set has {} samples but {} requested.".format(
+        assert len(self.train_loader.dataset) >= batch_size, "train-set has {} samples but {} bs requested.".format(
             len(self.train_loader.dataset), batch_size)
 
         self.test_loader = create_loader(dataset=test_dataset,
@@ -121,7 +122,7 @@ class AbstractLoader(object):
                                          batch_size=batch_size,
                                          shuffle=False,
                                          **loader_kwargs)
-        assert len(self.test_loader.dataset) >= batch_size, "test-set has {} samples but {} requested.".format(
+        assert len(self.test_loader.dataset) >= batch_size, "test-set has {} samples but {} bs requested.".format(
             len(self.test_loader.dataset), batch_size)
 
         if valid_dataset is not None:
@@ -130,8 +131,15 @@ class AbstractLoader(object):
                                               batch_size=batch_size,
                                               shuffle=True if self.train_sampler is None else False,
                                               **loader_kwargs)
-            assert len(self.valid_loader.dataset) >= batch_size, "valid-set has {} samples but {} requested.".format(
+            assert len(self.valid_loader.dataset) >= batch_size, "valid-set has {} samples but {} bs requested.".format(
                 len(self.valid_loader.dataset), batch_size)
+
+        # Set the dataset lengths if they exist.
+        self.num_train_samples = len(train_dataset)
+        self.num_test_samples = len(test_dataset)
+        self.num_valid_samples = len(valid_dataset) if valid_dataset is not None else 0
+        print("train = {} | test = {} | valid = {}".format(
+            self.num_train_samples, self.num_test_samples, self.num_valid_samples))
 
         # these need to be filled by the dataloader
         self.loss_type = None
