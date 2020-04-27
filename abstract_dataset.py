@@ -125,6 +125,7 @@ class AbstractLoader(object):
         assert len(self.test_loader.dataset) >= batch_size, "test-set has {} samples but {} bs requested.".format(
             len(self.test_loader.dataset), batch_size)
 
+        self.valid_loader = None
         if valid_dataset is not None:
             self.valid_loader = create_loader(dataset=valid_dataset,
                                               sampler=self.valid_sampler,

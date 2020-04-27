@@ -15,7 +15,7 @@ from datasets.permuted_mnist import PermutedMNISTLoader
 from datasets.sort import SortLoader
 from datasets.celeb_a import CelebALoader, CelebASequentialLoader
 from datasets.svhn import SVHNCenteredLoader, SVHNFullLoader
-from datasets.imagefolder import ImageFolderLoader
+from datasets.imagefolder import ImageFolderLoader, MultiAugmentImageFolder
 from datasets.multi_imagefolder import MultiImageFolderLoader
 from datasets.utils import sequential_dataset_merger
 
@@ -43,7 +43,8 @@ loader_map = {
     'svhn_centered': SVHNCenteredLoader,
     'svhn_full': SVHNFullLoader,
     'image_folder': ImageFolderLoader,
-    'multi_image_folder': MultiImageFolderLoader
+    'multi_augment_image_folder': MultiAugmentImageFolder,  # augments same image multiple times
+    'multi_image_folder': MultiImageFolderLoader,  # reads in parallel from multiple folders
 }
 
 
