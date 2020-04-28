@@ -7,7 +7,7 @@ from .abstract_dataset import AbstractLoader
 class MNISTLoader(AbstractLoader):
     """Simple MNIST loader, there is no validation set."""
 
-    def __init__(self, path, batch_size, num_replicas=0,
+    def __init__(self, path, batch_size, num_replicas=1,
                  train_sampler=None, test_sampler=None,
                  train_transform=None, train_target_transform=None,
                  test_transform=None, test_target_transform=None,

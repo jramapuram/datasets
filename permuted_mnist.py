@@ -23,7 +23,7 @@ def get_permutation_lambda_transform(pixel_permutation):
 class PermutedMNISTLoader(MNISTLoader):
     """Adds a unique (fixed) pixel permutation to the entire dataset."""
 
-    def __init__(self, path, batch_size, num_replicas=0,
+    def __init__(self, path, batch_size, num_replicas=1,
                  train_sampler=None, test_sampler=None,
                  train_transform=None, train_target_transform=None,
                  test_transform=None, test_target_transform=None,

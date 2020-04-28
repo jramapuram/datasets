@@ -207,7 +207,7 @@ class CelebADataset(torch.utils.data.Dataset):
 class _CelebALoader(AbstractLoader):
     """Simple CelebA loader, there is no validation set."""
 
-    def __init__(self, path, batch_size, num_replicas=0,
+    def __init__(self, path, batch_size, num_replicas=1,
                  train_sampler=None, test_sampler=None, valid_sampler=None,
                  train_transform=None, train_target_transform=None,
                  test_transform=None, test_target_transform=None,
@@ -248,7 +248,7 @@ class _CelebALoader(AbstractLoader):
 class CelebALoader(_CelebALoader):
     """Simple CelebA loader with validation set incl"""
 
-    def __init__(self, path, batch_size, num_replicas=0,
+    def __init__(self, path, batch_size, num_replicas=1,
                  train_sampler=None, test_sampler=None, valid_sampler=None,
                  train_transform=None, train_target_transform=None,
                  test_transform=None, test_target_transform=None,
@@ -265,7 +265,7 @@ class CelebALoader(_CelebALoader):
 class CelebASequentialLoader(_CelebALoader):
     """Simple CelebA loader which splits dataset using features."""
 
-    def __init__(self, path, batch_size, num_replicas=0,
+    def __init__(self, path, batch_size, num_replicas=1,
                  train_sampler=None, test_sampler=None, valid_sampler=None,
                  train_transform=None, train_target_transform=None,
                  test_transform=None, test_target_transform=None,

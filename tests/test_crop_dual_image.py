@@ -9,8 +9,8 @@ import numpy as np
 import matplotlib.pyplot as plt
 from crop_dual_imagefolder import CropDualImageFolderLoader
 
+
 def test_crops():
-    import matplotlib.pyplot as plt
     batch_size = 1
     data_dir = os.path.join(os.path.expanduser("~"), "datasets/fivek_6class")
     #data_dir = os.path.join(os.path.expanduser("~"), "datasets/cluttered_imagefolder_ptiff_v2")

@@ -333,7 +333,7 @@ class CropDualImageFolder(datasets.ImageFolder):
 class CropDualImageFolderLoader(AbstractLoader):
     """Reads from two data directories where the second one is large and returns lambdas."""
 
-    def __init__(self, path, batch_size, num_replicas=0,
+    def __init__(self, path, batch_size, num_replicas=1,
                  train_sampler=None, test_sampler=None,
                  train_transform=None, train_target_transform=None,
                  test_transform=None, test_target_transform=None,

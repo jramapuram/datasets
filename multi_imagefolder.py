@@ -4,7 +4,7 @@ import numpy as np
 import random
 
 from PIL import Image
-from torchvision import datasets, transforms
+from torchvision import datasets
 
 from .utils import temp_seed
 from .abstract_dataset import AbstractLoader
@@ -121,7 +121,7 @@ class MultiImageFolder(datasets.ImageFolder):
 class MultiImageFolderLoader(AbstractLoader):
     """Loads data from train_*, test_* and valid_* folders simultaneously."""
 
-    def __init__(self, path, batch_size, num_replicas=0,
+    def __init__(self, path, batch_size, num_replicas=1,
                  train_sampler=None, test_sampler=None, valid_sampler=None,
                  train_transform=None, train_target_transform=None,
                  test_transform=None, test_target_transform=None,

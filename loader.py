@@ -136,14 +136,20 @@ def get_loader(task: str, data_dir: str, batch_size: int, cuda: bool,
 
         loader = loaders[-1]
     else:
-        assert task in loader_map, "unknown task requested"
         if task == 'permuted':
             kwargs['seed'] = PERMUTE_SEED
-        elif task == 'crop_dual_imagefolder':
+
+        # Handle some lazy loaded tasks
+        if task == 'crop_dual_image_folder':
             # Lazy load this because of PYVIPS issues.
             from datasets.crop_dual_imagefolder import CropDualImageFolderLoader
-            loader_map['crop_dual_imagefolder'] = CropDualImageFolderLoader
+            loader_map['crop_dual_image_folder'] = CropDualImageFolderLoader
+        elif task == 'dali_image_folder':
+            # Lazy load this because we don't always have DALI
+            from datasets.dali_imagefolder import DALIImageFolderLoader
+            loader_map['dali_image_folder'] = DALIImageFolderLoader
 
+        assert task in loader_map, "unknown task requested: {}".format(task)
         return loader_map[task](path=data_dir,
                                 batch_size=batch_size,
                                 workers_per_replica=workers_per_replica,

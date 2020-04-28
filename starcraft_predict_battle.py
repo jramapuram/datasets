@@ -6,7 +6,6 @@ import torch
 import torchvision.transforms.functional as F
 
 from PIL import Image
-from torchvision import transforms
 
 from .utils import temp_seed
 from .abstract_dataset import AbstractLoader
@@ -169,7 +168,7 @@ def compute_sampler_weighting(path):
 class StarcraftPredictBattleLoader(AbstractLoader):
     """SC2 predict battle loader, there is no validation set."""
 
-    def __init__(self, path, batch_size, num_replicas=0,
+    def __init__(self, path, batch_size, num_replicas=1,
                  train_sampler=None, test_sampler=None,
                  train_transform=None, train_target_transform=None,
                  test_transform=None, test_target_transform=None,

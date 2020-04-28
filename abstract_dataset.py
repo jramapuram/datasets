@@ -41,7 +41,7 @@ class AbstractLoader(object):
                  train_transform=None, train_target_transform=None,
                  test_transform=None, test_target_transform=None,
                  valid_transform=None, valid_target_transform=None,
-                 workers_per_replica: int = 2, num_replicas: int = 0, seed: int = 42,
+                 workers_per_replica: int = 2, num_replicas: int = 1, seed: int = 42,
                  same_seed_workers: bool = False, timeout: int = 0,
                  pin_memory: bool = True, drop_last: bool = True, cuda: bool = False, **kwargs):
         """Load a dataset and wrap with loaders.
@@ -90,7 +90,7 @@ class AbstractLoader(object):
 
         # If we are distributed handle RNG
         worker_init_fn = get_worker_init_fn(seed=seed, same_seed_workers=same_seed_workers) \
-            if num_replicas > 0 else None
+            if num_replicas > 1 else None
 
         # Build the distributed data samplers
         if self.is_distributed:
@@ -171,6 +171,7 @@ class AbstractLoader(object):
 
     def determine_output_size(self):
         """Iterate dataset to find the maximum output size."""
+        print("iterating dataset to determine output_size; provide this in the future for a speedup...")
         for _, label in self.train_loader:
             if not isinstance(label, (float, int)) and len(label) > 1:
                 lbl = np.array(label).max()
