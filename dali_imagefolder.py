@@ -163,7 +163,7 @@ class HybridPipeline(Pipeline):
         """
         super(HybridPipeline, self).__init__(batch_size=batch_size,
                                              num_threads=workers_per_replica,
-                                             device_id=rank,
+                                             device_id=0,  # Always 0 because set via CUDA_VISIBLE_DEVICES
                                              seed=seed if seed is not None else -1)
         self.num_augments = num_augments
         transform_list = []
@@ -285,7 +285,7 @@ class DALIImageFolderLoader(AbstractLoader):
                                       device="gpu" if cuda else "cpu",
                                       transforms=test_transform,
                                       target_transform=test_target_transform,
-                                      rank=rank, num_replicas=1,  # Use FULL test set on each replica
+                                      rank=0, num_replicas=1,  # Use FULL test set on each replica
                                       num_augments=num_augments, **kwargs)
         test_dataset.build()
         self.test_loader = MultiAugmentDALIClassificationIterator(test_dataset, size=test_dataset.epoch_size("Reader"),
@@ -315,18 +315,15 @@ class DALIImageFolderLoader(AbstractLoader):
             )
 
         # Set the dataset lengths if they exist.
-        self.num_train_samples = train_dataset.epoch_size("Reader") // num_replicas
+        self.num_train_samples = train_dataset.epoch_size("Reader")
         self.num_test_samples = test_dataset.epoch_size("Reader")
-        self.num_valid_samples = valid_dataset.epoch_size("Reader") // num_replicas \
+        self.num_valid_samples = valid_dataset.epoch_size("Reader") \
             if self.valid_loader is not None else 0
         print("train = {} | test = {} | valid = {}".format(
             self.num_train_samples, self.num_test_samples, self.num_valid_samples))
 
         # grab a test sample to get the size
         sample = self.train_loader.__iter__().__next__()
-        for item in sample:
-            print('item: ', item.shape)
-
         self.input_shape = list(sample[0].size()[1:])
         print("derived image shape = ", self.input_shape)
 

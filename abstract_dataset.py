@@ -109,6 +109,7 @@ class AbstractLoader(object):
                          'worker_init_fn': worker_init_fn,
                          'timeout': timeout,
                          'drop_last': drop_last}
+        print('dataset loader: ', loader_kwargs)
         self.train_loader = create_loader(dataset=train_dataset,
                                           sampler=self.train_sampler,
                                           batch_size=batch_size,
