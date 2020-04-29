@@ -7,6 +7,7 @@ import numpy as np
 from typing import Tuple
 from copy import deepcopy
 from PIL import Image
+from torchvision import transforms
 
 from datasets.samplers import ClassSampler, FixedRandomSampler
 
@@ -33,6 +34,24 @@ def permute_lambda(img, pixel_permutation):
     return Image.fromarray(
         img.reshape(-1, 1)[pixel_permutation].reshape(img_orig_shape)
     )
+
+
+class GaussianBlur(object):
+    """Gaussian blur implementation; modified from: https://bit.ly/2WcVfWS """
+
+    def __init__(self, kernel_size, min=0.1, max=2.0, p=0.5):
+        self.min = min
+        self.max = max
+        self.prob = p
+        self.kernel_size = int(np.ceil(kernel_size) // 2 * 2 + 1)  # creates nearest odd number [cv2 req]
+
+    def __call__(self, sample):
+        sample = np.array(sample)
+        if np.random.random_sample() > self.prob:
+            sigma = (self.max - self.min) * np.random.normal() + self.min
+            sample = cv2.GaussianBlur(sample, (self.kernel_size, self.kernel_size), sigma)
+
+        return transforms.ToPILImage()(sample)  # back to PIL land
 
 
 # from https://tinyurl.com/yy3hyz4d

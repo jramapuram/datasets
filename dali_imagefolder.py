@@ -5,7 +5,7 @@ import nvidia.dali.types as types
 
 from typing import Optional
 from nvidia.dali.pipeline import Pipeline
-from nvidia.dali.plugin.pytorch import DALIClassificationIterator
+from nvidia.dali.plugin.pytorch import DALIClassificationIterator, DALIGenericIterator
 
 from .abstract_dataset import AbstractLoader
 
@@ -142,7 +142,8 @@ class HybridPipeline(Pipeline):
 
     def __init__(self, data_dir: str, batch_size: int, shuffle: bool = False, device: str = "gpu",
                  transforms=None, target_transform=None, workers_per_replica: int = 2,
-                 rank: int = 0, num_replicas: int = 1, seed: Optional[int] = None, **kwargs):
+                 rank: int = 0, num_replicas: int = 1, num_augments: int = 1,
+                 seed: Optional[int] = None, **kwargs):
         """Hybrid NVIDIA-DALI pipeline.
 
         :param data_dir: directory where images are stored.
@@ -154,6 +155,7 @@ class HybridPipeline(Pipeline):
         :param workers_per_replica: local dataloader threads to use
         :param rank: global rank in a DDP setting (or 0 for local)
         :param num_replicas: total replicas in the pool
+        :param num_augments: used if you want multiple augmentations of the image
         :param seed: optional seed for dataloader
         :returns: Dali pipeline
         :rtype: nvidia.dali.pipeline.Pipeline
@@ -163,6 +165,7 @@ class HybridPipeline(Pipeline):
                                              num_threads=workers_per_replica,
                                              device_id=rank,
                                              seed=seed if seed is not None else -1)
+        self.num_augments = num_augments
         transform_list = []
         if transforms is not None:
             assert isinstance(transforms, (tuple, list)), "transforms need to be a list/tuple or None."
@@ -201,14 +204,21 @@ class HybridPipeline(Pipeline):
 
         # Now apply the transforms
         if self.transforms:
-            for transform in self.transforms:
-                images = transform(images)
+            augmented = []
+            for _ in range(self.num_augments):  # Apply it multiple times if requested
+                augmented_i = images
+                for transform in self.transforms:
+                    augmented_i = transform(augmented_i)
+
+                augmented.append(augmented_i)
+        else:
+            augmented = [images]
 
         # transform the labels if applicable
         if self.target_transform:
             labels = self.target_transform(labels)
 
-        return images, labels
+        return (*augmented, labels)
 
 
 def get_local_rank(num_replicas):
@@ -247,7 +257,7 @@ class DALIImageFolderLoader(AbstractLoader):
                  train_transform=None, train_target_transform=None,
                  test_transform=None, test_target_transform=None,
                  valid_transform=None, valid_target_transform=None,
-                 cuda=True, **kwargs):
+                 cuda=True, num_augments=1, **kwargs):
         rank = get_local_rank(num_replicas)
 
         # Build the train dataset and loader
@@ -257,13 +267,15 @@ class DALIImageFolderLoader(AbstractLoader):
                                        device="gpu" if cuda else "cpu",
                                        transforms=train_transform,
                                        target_transform=train_target_transform,
-                                       rank=rank, num_replicas=num_replicas, **kwargs)
+                                       rank=rank, num_replicas=num_replicas,
+                                       num_augments=num_augments, **kwargs)
         train_dataset.build()
-        self.train_loader = DALIClassificationIteratorLikePytorch(
+        self.train_loader = MultiAugmentDALIClassificationIterator(
             train_dataset, size=train_dataset.epoch_size("Reader") // num_replicas,
             fill_last_batch=True,
             last_batch_padded=True,
-            auto_reset=True
+            auto_reset=True,
+            num_augments=num_augments
         )
 
         # Build the test dataset and loader
@@ -274,12 +286,13 @@ class DALIImageFolderLoader(AbstractLoader):
                                       transforms=test_transform,
                                       target_transform=test_target_transform,
                                       rank=rank, num_replicas=1,  # Use FULL test set on each replica
-                                      **kwargs)
+                                      num_augments=num_augments, **kwargs)
         test_dataset.build()
-        self.test_loader = DALIClassificationIteratorLikePytorch(test_dataset, size=test_dataset.epoch_size("Reader"),
-                                                                 fill_last_batch=True,
-                                                                 last_batch_padded=True,
-                                                                 auto_reset=True)
+        self.test_loader = MultiAugmentDALIClassificationIterator(test_dataset, size=test_dataset.epoch_size("Reader"),
+                                                                  fill_last_batch=True,
+                                                                  last_batch_padded=True,
+                                                                  auto_reset=True,
+                                                                  num_augments=num_augments)
 
         # Build the valid dataset and loader
         self.valid_loader = None
@@ -290,13 +303,15 @@ class DALIImageFolderLoader(AbstractLoader):
                                            device="gpu" if cuda else "cpu",
                                            transforms=valid_transform,
                                            target_transform=valid_target_transform,
-                                           rank=rank, num_replicas=num_replicas, **kwargs)
+                                           rank=rank, num_replicas=num_replicas,
+                                           num_augments=num_augments, **kwargs)
             valid_dataset.build()
-            self.valid_loader = DALIClassificationIteratorLikePytorch(
+            self.valid_loader = MultiAugmentDALIClassificationIterator(
                 valid_dataset, size=valid_dataset.epoch_size("Reader") // num_replicas,
                 fill_last_batch=True,
                 last_batch_padded=True,
-                auto_reset=True
+                auto_reset=True,
+                num_augments=num_augments
             )
 
         # Set the dataset lengths if they exist.
@@ -308,8 +323,11 @@ class DALIImageFolderLoader(AbstractLoader):
             self.num_train_samples, self.num_test_samples, self.num_valid_samples))
 
         # grab a test sample to get the size
-        test_img, _ = self.train_loader.__iter__().__next__()
-        self.input_shape = list(test_img.size()[1:])
+        sample = self.train_loader.__iter__().__next__()
+        for item in sample:
+            print('item: ', item.shape)
+
+        self.input_shape = list(sample[0].size()[1:])
         print("derived image shape = ", self.input_shape)
 
         # derive the output size using the imagefolder attr
@@ -324,3 +342,60 @@ class DALIImageFolderLoader(AbstractLoader):
     def set_epoch(self, epoch, split):
         """No-op here as it is handled via the pipeline already."""
         pass
+
+
+class MultiAugmentDALIClassificationIterator(DALIGenericIterator):
+    """Only change is the output map to accommodate multiple augmentations."""
+
+    def __init__(self,
+                 pipelines,
+                 size,
+                 auto_reset=False,
+                 fill_last_batch=True,
+                 dynamic_shape=False,
+                 last_batch_padded=False,
+                 num_augments=2):
+        output_map = ["data{}".format(i) for i in range(num_augments)] + ["label"]
+        super(MultiAugmentDALIClassificationIterator, self).__init__(pipelines, output_map,
+                                                                     size, auto_reset=auto_reset,
+                                                                     fill_last_batch=fill_last_batch,
+                                                                     dynamic_shape=dynamic_shape,
+                                                                     last_batch_padded=last_batch_padded)
+
+    def __next__(self):
+        """Override this to return things like pytorch."""
+
+        sample = super(MultiAugmentDALIClassificationIterator, self).__next__()
+
+        if sample is not None and len(sample) > 0:
+            if isinstance(sample[0], dict):
+                images = [sample[0][k] for k in sample[0].keys() if "data" in k]
+                labels = sample[0]["label"]
+            else:
+                labels = sample[-1]
+                images = sample[0:-1]
+
+            for idx in range(len(images)):
+                images[idx] = images[idx].float() / 255
+
+            return [*images, labels.squeeze().long()]
+
+
+class MultiAugmentDALIImageFolderLoader(DALIImageFolderLoader):
+    """Differs from above with num_augments returning multiple copies of the image augmentation."""
+
+    def __init__(self, path, batch_size, num_replicas=1,
+                 train_sampler=None, test_sampler=None, valid_sampler=None,
+                 train_transform=None, train_target_transform=None,
+                 test_transform=None, test_target_transform=None,
+                 valid_transform=None, valid_target_transform=None,
+                 num_augments=2, cuda=True, **kwargs):
+        super(MultiAugmentDALIImageFolderLoader, self).__init__(
+            path=path, batch_size=batch_size, num_replicas=num_replicas,
+            train_sampler=train_sampler, test_sampler=test_sampler, valid_sampler=valid_sampler,
+            train_transform=train_transform, train_target_transform=train_target_transform,
+            test_transform=test_transform, test_target_transform=test_target_transform,
+            valid_transform=valid_transform, valid_target_transform=valid_target_transform,
+            num_augments=num_augments,  # The only difference here is that we set multiple augmentations
+            cuda=cuda, **kwargs
+        )

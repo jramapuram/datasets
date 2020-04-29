@@ -128,6 +128,8 @@ def get_loader(task: str, data_dir: str, batch_size: int, cuda: bool,
                 PERMUTE_SEED += 1
 
         PERMUTE_SEED = 1  # Reset global seed here
+
+        # Logic to merge the entire dataset (all splits) using sequential_dataset_merger.
         has_valid = np.all([hasattr(l, 'valid_loader') for l in loaders])
         splits = ['train', 'test'] if not has_valid else ['train', 'test', 'valid']
         for split in splits:
@@ -144,10 +146,11 @@ def get_loader(task: str, data_dir: str, batch_size: int, cuda: bool,
             # Lazy load this because of PYVIPS issues.
             from datasets.crop_dual_imagefolder import CropDualImageFolderLoader
             loader_map['crop_dual_image_folder'] = CropDualImageFolderLoader
-        elif task == 'dali_image_folder':
+        elif task == 'dali_image_folder' or task == 'dali_multi_augment_image_folder':
             # Lazy load this because we don't always have DALI
-            from datasets.dali_imagefolder import DALIImageFolderLoader
+            from datasets.dali_imagefolder import DALIImageFolderLoader, MultiAugmentDALIImageFolderLoader
             loader_map['dali_image_folder'] = DALIImageFolderLoader
+            loader_map['dali_multi_augment_image_folder'] = MultiAugmentDALIImageFolderLoader
 
         assert task in loader_map, "unknown task requested: {}".format(task)
         return loader_map[task](path=data_dir,
@@ -196,7 +199,7 @@ def get_split_data_loaders(task: str, num_classes: int, data_dir: str, batch_siz
     global PERMUTE_SEED
 
     loaders = []
-    if '+' in task:  # the merge operand
+    if '+' in task:  # the merge operand (test only for get_split_data_loaders!)
         for split in task.split('+'):
             loaders.extend([
                 get_loader(task=split, batch_size=batch_size, cuda=cuda,
@@ -250,7 +253,7 @@ def get_split_data_loaders(task: str, num_classes: int, data_dir: str, batch_siz
         loaders = [item for sublist in loaders for item in sublist]
 
     PERMUTE_SEED = 1
-    if sequentially_merge_test:  # merge test sets sequentially
-        return sequential_dataset_merger(loaders, 'test')
+    if sequentially_merge_test:  # merge test sets sequentially w/ a fixed shuffle on the test
+        return sequential_dataset_merger(loaders, 'test', fixed_shuffle=True)
 
     return loaders
