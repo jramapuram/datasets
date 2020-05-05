@@ -3,6 +3,7 @@ import torch.distributed as dist
 import nvidia.dali.ops as ops
 import nvidia.dali.types as types
 
+from copy import deepcopy
 from typing import Optional
 from nvidia.dali.pipeline import Pipeline
 from nvidia.dali.plugin.pytorch import DALIClassificationIterator, DALIGenericIterator
@@ -261,6 +262,8 @@ class DALIImageFolderLoader(AbstractLoader):
         rank = get_local_rank(num_replicas)
 
         # Build the train dataset and loader
+        train_kwargs = deepcopy(kwargs)
+        train_kwargs['seed'] = train_kwargs.get('seed', 1234 + rank) or 1234 + rank  # different RNG per replica
         train_dataset = HybridPipeline(data_dir=os.path.join(path, 'train'),
                                        batch_size=batch_size,
                                        shuffle=True,
@@ -268,7 +271,7 @@ class DALIImageFolderLoader(AbstractLoader):
                                        transforms=train_transform,
                                        target_transform=train_target_transform,
                                        rank=rank, num_replicas=num_replicas,
-                                       num_augments=num_augments, **kwargs)
+                                       num_augments=num_augments, **train_kwargs)
         train_dataset.build()
         self.train_loader = MultiAugmentDALIClassificationIterator(
             train_dataset, size=train_dataset.epoch_size("Reader") // num_replicas,
@@ -279,6 +282,8 @@ class DALIImageFolderLoader(AbstractLoader):
         )
 
         # Build the test dataset and loader
+        val_test_kwargs = deepcopy(kwargs)
+        val_test_kwargs['seed'] = 1234 + rank  # Fixed shuffle for each replica
         test_dataset = HybridPipeline(data_dir=os.path.join(path, 'test'),
                                       batch_size=batch_size,
                                       shuffle=False,
@@ -286,7 +291,7 @@ class DALIImageFolderLoader(AbstractLoader):
                                       transforms=test_transform,
                                       target_transform=test_target_transform,
                                       rank=0, num_replicas=1,  # Use FULL test set on each replica
-                                      num_augments=num_augments, **kwargs)
+                                      num_augments=num_augments, **val_test_kwargs)
         test_dataset.build()
         self.test_loader = MultiAugmentDALIClassificationIterator(test_dataset, size=test_dataset.epoch_size("Reader"),
                                                                   fill_last_batch=True,
@@ -304,7 +309,7 @@ class DALIImageFolderLoader(AbstractLoader):
                                            transforms=valid_transform,
                                            target_transform=valid_target_transform,
                                            rank=rank, num_replicas=num_replicas,
-                                           num_augments=num_augments, **kwargs)
+                                           num_augments=num_augments, **val_test_kwargs)
             valid_dataset.build()
             self.valid_loader = MultiAugmentDALIClassificationIterator(
                 valid_dataset, size=valid_dataset.epoch_size("Reader") // num_replicas,
