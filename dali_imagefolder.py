@@ -31,17 +31,18 @@ class Mux(object):
 
 
 class RandomGrayScale(object):
-    """Parallels RandomGrayscale from torchvision. Currently BROKEN!"""
+    """Parallels RandomGrayscale from torchvision. Written by @klecki"""
 
     def __init__(self, prob=0.5, cuda=True):
-        raise NotImplementedError("Can't do this with DALI yet.")
-        self.mux = Mux(prob=prob)
-        self.op = ops.ColorSpaceConversion(device="gpu" if cuda else "cpu",
-                                           image_type=types.RGB,
-                                           output_type=types.GRAY)
+        self.coin = ops.CoinFlip(probability=prob)
+        self.cast_fp32 = ops.Cast(dtype=types.FLOAT)
+        self.hsv = ops.Hsv(device="gpu" if cuda else "cpu", dtype=types.UINT8)
 
     def __call__(self, images):
-        return self.mux(true_case=self.op(images), false_case=images)
+        saturate = self.coin()
+        saturate_fp32 = self.cast_fp32(saturate)
+        converted = self.hsv(images, saturation=saturate_fp32)
+        return converted
 
 
 class RandomHorizontalFlip(object):
