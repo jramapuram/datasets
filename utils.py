@@ -9,6 +9,7 @@ from copy import deepcopy
 from PIL import Image
 from torchvision import transforms
 
+import datasets.loader as ldr
 from datasets.samplers import ClassSampler, FixedRandomSampler
 
 cv2.setNumThreads(0)  # since we use pytorch workers
@@ -323,3 +324,55 @@ def sequential_test_set_merger(loaders):
 
     """
     return sequential_dataset_merger(loaders, split='train', fixed_shuffle=True)
+
+
+def data_loader_to_np(data_loader):
+    """ Use the data-loader to iterate and return np array.
+        Useful for FID calculations
+
+    :param data_loader: the torch dataloader
+    :returns: numpy array of input images
+    :rtype: np.array
+
+    """
+    images_array = []
+    for img, _ in data_loader:
+        images_array.append(img)
+
+    images_array = np.transpose(np.vstack(images_array), [0, 2, 3, 1])
+
+    # convert to uint8
+    if images_array.max() < 255:
+        images_array *= 255
+
+    assert images_array.shape[-1] == 3 or images_array.shape[-1] == 1
+    return images_array.astype(np.uint8)
+
+
+def get_numpy_dataset(task, data_dir, test_transform, split, cuda):
+    """ Builds the loader --> get test numpy data and returns.
+
+    :param task: the string task to use
+    :param data_dir: directory for data
+    :param test_transform: list of test transforms as in get_loader
+    :param split: train, test or valid
+    :param cuda: bool indiciating cuda or not
+    :returns: test numpy array
+    :rtype: np.array
+
+    """
+    loader = ldr.get_loader(task=task,
+                            data_dir=data_dir,
+                            batch_size=1,
+                            cuda=cuda, pin_memory=cuda,
+                            test_transform=test_transform)
+
+    # gather the training and test datasets in numpy
+    if split == 'test':
+        return data_loader_to_np(loader.test_loader)
+    elif split == 'train':
+        return data_loader_to_np(loader.train_loader)
+    elif split == 'valid':
+        return data_loader_to_np(loader.valid_loader)
+
+    raise ValueError("Unknown split provided to get_numpy_dataset.")
