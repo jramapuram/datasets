@@ -349,28 +349,25 @@ def data_loader_to_np(data_loader):
     return images_array.astype(np.uint8)
 
 
-def get_numpy_dataset(task, data_dir, test_transform, split, image_size=None, cuda=False):
+def get_numpy_dataset(task, data_dir, transform, split, cuda=False):
     """ Builds the loader --> get test numpy data and returns.
 
     :param task: the string task to use
     :param data_dir: directory for data
-    :param test_transform: list of test transforms as in get_loader
+    :param transform: the transform to use for the dataset
     :param split: train, test or valid
-    :param image_size: None to not resize, int to resize
     :param cuda: bool indiciating cuda or not
     :returns: test numpy array
     :rtype: np.array
 
     """
-    xform = transforms.Resize((image_size, image_size)) if image_size \
-        else transforms.Lambda(lambda x: x)
     loader = ldr.get_loader(task=task,
                             data_dir=data_dir,
                             batch_size=1,
                             cuda=cuda, pin_memory=cuda,
-                            train_transform=[xform],
-                            test_transform=[xform],
-                            valid_transform=[xform])
+                            train_transform=transform,
+                            test_transform=transform,
+                            valid_transform=transform)
 
     # gather the training and test datasets in numpy
     if split == 'test':
