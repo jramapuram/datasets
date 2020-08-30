@@ -17,6 +17,7 @@ from datasets.celeb_a import CelebALoader, CelebASequentialLoader
 from datasets.svhn import SVHNCenteredLoader, SVHNFullLoader
 from datasets.imagefolder import ImageFolderLoader, MultiAugmentImageFolder
 from datasets.multi_imagefolder import MultiImageFolderLoader
+from datasets.dmlab_mazes import DMLabMazesLoader
 from datasets.utils import sequential_dataset_merger
 
 # ensures we get the same permutation
@@ -27,6 +28,7 @@ loader_map = {
     'sort': SortLoader,
     'nih_chest_xray': NIHChestXrayLoader,
     'starcraft_predict_battle': StarcraftPredictBattleLoader,
+    'dmlab_mazes': DMLabMazesLoader,
     'mnist': MNISTLoader,
     'binarized_mnist': BinarizedMNISTLoader,
     'binarized_omniglot': BinarizedOmniglotLoader,
