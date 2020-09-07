@@ -349,7 +349,7 @@ def data_loader_to_np(data_loader):
     return images_array.astype(np.uint8)
 
 
-def get_numpy_dataset(task, data_dir, transform, split, cuda=False):
+def get_numpy_dataset(task, data_dir, transform, split, cuda=False, workers_per_replica=2):
     """ Builds the loader --> get test numpy data and returns.
 
     :param task: the string task to use
@@ -357,6 +357,7 @@ def get_numpy_dataset(task, data_dir, transform, split, cuda=False):
     :param transform: the transform to use for the dataset
     :param split: train, test or valid
     :param cuda: bool indiciating cuda or not
+    :param workers_per_replica: number of dataloading threads
     :returns: test numpy array
     :rtype: np.array
 
@@ -367,7 +368,8 @@ def get_numpy_dataset(task, data_dir, transform, split, cuda=False):
                             cuda=cuda, pin_memory=cuda,
                             train_transform=transform,
                             test_transform=transform,
-                            valid_transform=transform)
+                            valid_transform=transform,
+                            workers_per_replica=workers_per_replica)
 
     # gather the training and test datasets in numpy
     if split == 'test':
